@@ -1,0 +1,227 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="login-container">
+    <h2>Iniciar Sesión</h2>
+    <span class="login-version">V202604151</span>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">
+            {{ message }}
+        </div>
+        {% endfor %} 
+    {% endif %}
+
+    <form method="post" id="loginForm">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="username">Cédula:</label>
+            <input type="text" id="username" name="username" required>
+        </div>
+        <div class="form-group">
+            <label for="password">Contraseña:</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        <button type="submit">Ingresar</button>
+    </form>
+</div>
+
+<!-- Modal para selección de perfil -->
+<div id="modalPerfiles" class="modal">
+    <div class="modal-content">
+        <h3>Seleccione su Perfil</h3>
+        <p>Bienvenido <span id="nombreUsuario"></span></p>
+
+        <div class="perfiles-list">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="perfilSeleccionado">Perfil:</label>
+                <select id="perfilSeleccionado" name="perfil_seleccionado" class="select-menu" required>
+                    <option value="">-- Seleccione un perfil --</option>
+                    <!-- Los perfiles se cargarán dinámicamente via JavaScript -->
+                </select>
+            </div>
+
+            <button type="button" id="btnContinuar" class="btn-continuar">Continuar al Dashboard</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- JavaScript para manejar la autenticación con Web Service -->
+<script>
+    // URL del Web Service (usando la etiqueta de plantilla Django)
+    const WS_LOGIN_URL = "{% url 'login' %}";
+    const DASHBOARD_URL = "{% url 'dashboard' %}";
+    const PERFILES_URL = "{% url 'seleccionar_perfil' %}";  // Asegúrate de tener esta URL configurada
+
+    // Función para mostrar mensajes de error
+    function showErrorMessage(message) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-error';
+        alertDiv.textContent = message;
+
+        const h2Element = document.querySelector('h2');
+        if (h2Element) {
+            h2Element.parentNode.insertBefore(alertDiv, h2Element.nextSibling);
+        } else {
+            const loginContainer = document.querySelector('.login-container');
+            if (loginContainer) {
+                loginContainer.insertBefore(alertDiv, loginContainer.firstChild);
+            }
+        }
+
+        setTimeout(() => {
+            alertDiv.remove();
+        }, 5000);
+    }
+
+    // Función para cargar perfiles desde el servidor
+    function cargarPerfiles() {
+        const selectElement = document.getElementById('perfilSeleccionado');
+        
+        // Limpiar opciones excepto la primera
+        while (selectElement.options.length > 1) {
+            selectElement.remove(1);
+        }
+
+        // Mostrar loading
+        const loadingOption = document.createElement('option');
+        loadingOption.value = '';
+        loadingOption.textContent = 'Cargando perfiles...';
+        loadingOption.disabled = true;
+        selectElement.appendChild(loadingOption);
+
+        fetch(PERFILES_URL, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('Error al cargar perfiles');
+            return response.json();
+        })
+        .then(data => {
+            // Remover opción de loading
+            selectElement.remove(selectElement.options.length - 1);
+
+            if (data.perfiles && data.perfiles.length > 0) {
+                // Agregar perfiles al dropdown
+                data.perfiles.forEach(perfil => {
+                    const option = document.createElement('option');
+                    option.value = perfil.id; // ← Valor del option
+                    option.textContent = perfil.nombre; // ← Texto visible
+                    selectElement.appendChild(option); // ← Agrega al select
+                });
+            } else {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No hay perfiles disponibles';
+                option.disabled = true;
+                selectElement.appendChild(option);
+            }
+        })
+        .catch(error => {
+            console.error('Error al cargar perfiles:', error);
+            selectElement.remove(selectElement.options.length - 1);
+            
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'Error al cargar perfiles';
+            option.disabled = true;
+            selectElement.appendChild(option);
+        });
+    }
+
+    function showModal() {
+        const modal = document.getElementById('modalPerfiles');
+        if (modal) {
+            modal.style.display = 'block';
+            // Cargar perfiles cuando se muestra el modal
+            cargarPerfiles();
+        }
+    }
+
+    function hideModal() {
+        const modal = document.getElementById('modalPerfiles');
+        if (modal) modal.style.display = 'none';
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = "Autenticando...";
+        submitBtn.disabled = true;
+
+        document.querySelectorAll('.alert').forEach(alert => alert.remove());
+
+        fetch(WS_LOGIN_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&csrfmiddlewaretoken=${document.querySelector('[name=csrfmiddlewaretoken]').value}`
+        })
+            .then(response => {
+                if (!response.ok) throw new Error('Error en la respuesta del servidor');
+                return response.json();
+            })
+            .then(data => {
+                console.log('Respuesta del servidor:', data);
+                if (data.success && data.activo) {
+                    showModal();
+                    document.getElementById('nombreUsuario').textContent = data.usuario_nombre || username;
+                } else {
+                    const errorMessage = data.message || 'Error en la autenticación';
+                    showErrorMessage(errorMessage);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showErrorMessage('Error de conexión con el servidor');
+            })
+            .finally(() => {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            });
+    });
+
+    document.getElementById('btnContinuar').addEventListener('click', function () {
+        const selectElement = document.getElementById('perfilSeleccionado');
+        const selectedProfile = selectElement.value;
+        
+        if (!selectedProfile) {
+            showErrorMessage('Por favor seleccione un perfil');
+            return;
+        }
+        
+        // También puedes enviar el nombre del perfil si lo necesitas
+        const selectedOption = selectElement.options[selectElement.selectedIndex];
+        const nombrePerfil = selectedOption.textContent;
+        
+        window.location.href = DASHBOARD_URL + '?perfil=' + encodeURIComponent(selectedProfile) + '&nombre=' + encodeURIComponent(nombrePerfil);
+    });
+
+    document.addEventListener('click', function (e) {
+        const modal = document.getElementById('modalPerfiles');
+        if (modal && e.target === modal) modal.style.display = 'none';
+    });
+
+    document.addEventListener('keydown', function (e) {
+        const modal = document.getElementById('modalPerfiles');
+        if (e.key === 'Escape' && modal && modal.style.display === 'block') {
+            modal.style.display = 'none';
+        }
+    });
+</script>
+{% endblock %}

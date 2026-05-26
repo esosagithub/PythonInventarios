@@ -1,0 +1,345 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Franja azul superior con logo (ya está en base.html) -->
+
+    <!-- Menú Hamburguesa -->
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <!-- Overlay para menú móvil -->
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Contenedor principal que incluye sidebar y contenido -->
+    <div class="dashboard-main-wrapper">
+        <!-- Menú Lateral - MODIFICADO: Eliminada posición fixed -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>Sistema Inventarios</h3>
+                <p>{{ usuario.nombre|truncatewords:2 }}</p>
+                <small>{{ perfil }}</small>
+            </div>
+
+            <nav class="sidebar-menu">
+                <ul>
+                    <li class="menu-item">
+                        <a href="{% url 'dashboard' %}">
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    <!-- ADMINISTRACIÓN DE CONTEO - SOLO PARA ADMINISTRATIVO -->
+                    {% if perfil == "ADMINISTRATIVO" %}
+                    <li class="menu-item">
+                        <a href="{% url 'administracion_conteo' %}">
+                            <span>Administración de Conteo</span>
+                        </a>
+                    </li>
+                    {% elif perfil == "JEFE DE TIENDA" %}
+                    <li class="menu-item">
+                        <a href="{% url 'administracion_conteo_jefe' %}">
+                            <span>Administración de Conteo</span>
+                        </a>
+                    </li>
+                    {% endif %}
+
+                    {% if perfil != "ADMINISTRATIVO" %}
+                    <li class="menu-item">
+                        <a href="{% url 'gestion_conteos' %}">
+                            <span>Gestión de Conteos</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if perfil != "ADMINISTRATIVO" %}
+                    <li class="menu-item">
+                        <a href="{% url 'primer_conteo' %}">
+                            <span>Primer Conteo</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if perfil != "ADMINISTRATIVO" %}
+                    <li class="menu-item">
+                        <a href="{% url 'reporte_primer_conteo' %}">
+                            <span>Reporte Primer Conteo</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if perfil != "ADMINISTRATIVO" %}
+                    <li class="menu-item">
+                        <a href="{% url 'segundo_conteo' %}">
+                            <span>Segundo Conteo</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if perfil != "ADMINISTRATIVO" %}
+                    <li class="menu-item">
+                        <a href="{% url 'acta_preliminar' %}">
+                            <span>Acta Preliminar</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+
+            <div class="sidebar-footer">
+                <a href="{% url 'login' %}" class="logout-btn">
+                    <span>Cerrar Sesión</span>
+                </a>
+            </div>
+        </div>
+
+    <!-- Contenido Principal -->
+    <div class="main-content" id="mainContent">
+        <div class="content-header dh-header">
+            <div class="dh-left">
+                <span class="dh-eyebrow">Sistema Control de inventarios</span>
+                <h1 class="dh-title">Dashboard Principal</h1>
+                <p class="dh-welcome">
+                    <span id="saludoDinamico">Bienvenido</span>, <strong>{{ usuario.nombre }}</strong>
+                </p>
+                <div class="dh-meta-row">
+                    <span class="dh-pill">
+                        <i class="fas fa-store"></i>
+                        {{ usuario.empresa|default:usuario.tienda|default:"Tienda no asignada" }}
+                    </span>
+                    <span class="dh-pill">
+                        <i class="fas fa-briefcase"></i>
+                        {{ usuario.cargo|default:perfil }}
+                    </span>
+                    <span class="dh-pill dh-time-pill">
+                        <i class="fas fa-clock"></i>
+                        <span id="horaActual">--:--:--</span>
+                    </span>
+                </div>
+            </div>
+
+            <div class="dh-badge">
+                <i class="fas fa-user-circle dh-avatar"></i>
+                <div>
+                    <div class="dh-badge-name">{{ usuario.nombre|truncatewords:2 }}</div>
+                    <div class="dh-badge-role">{{ perfil }}</div>
+                    <div class="dh-badge-date" id="fechaActual">-- --- ----</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content-body"></div>
+    </div>
+
+<style>
+.dh-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 28px 32px !important;
+    border: 1px solid #dbeafe;
+    border-left: 6px solid #2563eb;
+    background: linear-gradient(130deg, #eff6ff 0%, #ffffff 55%, #f8fafc 100%) !important;
+    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+    border-radius: 14px;
+    flex-wrap: wrap;
+}
+.dh-left { flex: 1; min-width: 0; }
+.dh-eyebrow {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #2563eb;
+    margin-bottom: 6px;
+}
+.dh-title {
+    font-size: 26px !important;
+    font-weight: 800 !important;
+    color: #0f172a !important;
+    margin: 0 0 8px !important;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+}
+.dh-welcome {
+    font-size: 16px;
+    color: #475569;
+    margin: 0 0 12px !important;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.dh-welcome strong {
+    color: #1e293b;
+    font-weight: 600;
+}
+.dh-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.dh-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    color: #1e3a8a;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 7px 12px;
+    border-radius: 999px;
+    letter-spacing: .2px;
+}
+.dh-pill i {
+    color: #2563eb;
+    font-size: 12px;
+}
+.dh-time-pill {
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+.dh-badge {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 18px;
+    flex-shrink: 0;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+.dh-avatar {
+    font-size: 36px;
+    color: #2563eb;
+    opacity: .85;
+}
+.dh-badge-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e293b;
+    line-height: 1.2;
+    max-width: 160px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dh-badge-role {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    color: #2563eb;
+    margin-top: 3px;
+}
+.dh-badge-date {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 3px;
+    text-transform: capitalize;
+}
+@media (max-width: 600px) {
+    .dh-badge {
+        width: 100%;
+        justify-content: center;
+    }
+    .dh-header { padding: 20px !important; }
+    .dh-title { font-size: 20px !important; }
+    .dh-welcome { font-size: 14px; }
+    .dh-pill { width: 100%; justify-content: center; }
+}
+</style>
+</div>
+
+<!-- Incluir JavaScript del Dashboard -->
+<script src="{% static 'js/dashboard.js' %}"></script>
+
+<script>
+// Debug en tiempo real y funcionalidades adicionales
+document.addEventListener('DOMContentLoaded', function() {
+    // Animación del botón hamburguesa
+    const menuToggle = document.getElementById('menuToggle');
+    const sidebar = document.getElementById('sidebar');
+
+    if (menuToggle) {
+        menuToggle.addEventListener('click', function() {
+            menuToggle.classList.toggle('active');
+        });
+    }
+
+    function actualizarRelojDashboard() {
+        const horaActual = document.getElementById('horaActual');
+        const fechaActual = document.getElementById('fechaActual');
+        const saludoDinamico = document.getElementById('saludoDinamico');
+        const ahora = new Date();
+
+        if (horaActual) {
+            horaActual.textContent = ahora.toLocaleTimeString('es-EC', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        if (fechaActual) {
+            fechaActual.textContent = ahora.toLocaleDateString('es-EC', {
+                weekday: 'long',
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric'
+            });
+        }
+
+        if (saludoDinamico) {
+            const hora = ahora.getHours();
+            if (hora < 12) {
+                saludoDinamico.textContent = 'Buenos dias';
+            } else if (hora < 19) {
+                saludoDinamico.textContent = 'Buenas tardes';
+            } else {
+                saludoDinamico.textContent = 'Buenas noches';
+            }
+        }
+    }
+
+    actualizarRelojDashboard();
+    setInterval(actualizarRelojDashboard, 1000);
+
+    // Debug en tiempo real - mejorado
+    function updateDebugInfo() {
+        const debugElements = {
+            debugWidth: document.getElementById('debugWidth'),
+            debugMenuState: document.getElementById('debugMenuState'),
+            debugTransform: document.getElementById('debugTransform'),
+            debugVisible: document.getElementById('debugVisible')
+        };
+
+        if (sidebar && Object.values(debugElements).every(el => el)) {
+            debugElements.debugWidth.textContent = window.innerWidth;
+            debugElements.debugMenuState.textContent = sidebar.classList.contains('menu-open') ? 'OPEN' : 'CLOSED';
+            debugElements.debugTransform.textContent = getComputedStyle(sidebar).transform;
+            debugElements.debugVisible.textContent = getComputedStyle(sidebar).visibility;
+        }
+    }
+
+    // Actualizar debug cada 100ms
+    setInterval(updateDebugInfo, 100);
+
+    // Test button para debugging
+    window.testMenu = function() {
+        console.log('🧪 Testing menu...');
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            sidebar.classList.toggle('menu-open');
+            console.log('Menu toggled, classes:', sidebar.className);
+        }
+    };
+
+    console.log('🚀 Debug y funcionalidades adicionales cargadas');
+    console.log('💡 Tip: Usa testMenu() en consola para probar el menú');
+});
+</script>
+{% endblock %}

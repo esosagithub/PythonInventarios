@@ -1,0 +1,2680 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Menú Hamburguesa -->
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <!-- Overlay para menú móvil -->
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Menú Lateral -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                {% if perfil == "JEFE DE TIENDA" %}
+                <li class="menu-item">
+                    <a href="{% url 'primer_conteo' %}">
+                        <span>Primer Conteo</span>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Contenido Principal -->
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Gestión de Conteos</h1>
+            <p>Gestión de inventarios físicos y conteos de stock</p>
+        </div>
+
+        <!-- Barra de Acciones -->
+        <div class="action-bar">
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="openFiltersModal()">
+                    <i class="icon">⌕</i> Filtros
+                </button>
+            </div>
+
+        </div>
+
+        <!-- Filtros activos -->
+        <div class="active-filters" id="activeFilters" style="display: none;">
+            <h3>Filtros activos:</h3>
+            <div class="filter-tags" id="filterTags"></div>
+        </div>
+
+        <!-- Lista de Conteos -->
+        <div class="card">
+            <h2>Conteos de Inventario</h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Número del Conteo</th>
+                            <th>Estado</th>
+                            <th>Fecha Inicio</th>
+                            <th>Fecha Fin</th>
+                            <th>Responsable</th>
+                            <th>Planifica</th>
+                            <th>Centro</th>
+                            <th>Almacén</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="conteoTableBody">
+                        {% for conteo in conteos %}
+                        <tr>
+                            <td>{{ conteo.numero_conteo }}</td>
+                            <td>
+                                <span class="status-badge status-{{ conteo.estado|lower }}">
+                                    {{ conteo.estado }}
+                                </span>
+                            </td>
+                            <td>{{ conteo.fecha_inicio }}</td>
+                            <td>{{ conteo.fecha_fin }}</td>
+                            <td>{{ conteo.nm_responsable }}</td>
+                            <td>{{ conteo.usuario_creacion }}</td>
+                            <td>{{ conteo.centro }}</td>
+                            <td>{{ conteo.almacen }}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    {% if conteo.estado == 'PRIMER_CONTEO' or conteo.estado == 'SEGUNDO_CONTEO' or conteo.estado == 'ACTA_PRELIMINAR' %}
+                                    <button class="btn btn-icon btn-disabled" title="Detalle no disponible en este estado" disabled>
+                                        <i class="fas fa-file-lines"></i>
+                                    </button>
+                                    {% else %}
+                                    <button class="btn btn-icon" title="Ver detalle"
+                                        onclick="verDetalle('{{ conteo.id }}')">
+                                        <i class="fas fa-file-lines"></i>
+                                    </button>
+                                    {% endif %}
+                                    {% if conteo.estado == 'PENDIENTE' or conteo.estado == 'EN_PROCESO' %}
+                                    <button class="btn btn-icon" title="Asignar Personal"
+                                        onclick="redirigirAsignarPersonal('{{ conteo.id }}')">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                    {% else %}
+                                    <button class="btn btn-icon" title="Asignar Personal" disabled
+                                        style="background-color: #ccc; cursor: not-allowed;">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="9" style="text-align: center; padding: 20px;">
+                                No hay conteos de inventario registrados.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Estadísticas Rápidas -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3 id="totalConteos">{{ estadisticas.total }}</h3>
+                <small>Total Conteos</small>
+            </div>
+
+            <div class="stat-card">
+                <h3 id="pendientesConteos">{{ estadisticas.pendientes }}</h3>
+                <small>Pendientes</small>
+            </div>
+            <div class="stat-card">
+                <h3 id="procesoConteos">{{ estadisticas.en_proceso }}</h3>
+                <small>En Proceso</small>
+            </div>
+            <div class="stat-card">
+                <h3 id="completadosConteos">{{ estadisticas.completados }}</h3>
+                <small>Completados</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE FILTROS -->
+<div id="filtersModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>⌕ Filtros de Búsqueda</h2>
+            <button class="close" onclick="closeFiltersModal()">&times;</button>
+        </div>
+
+        <div class="modal-body">
+            <form id="filtersForm" class="filter-form">
+                <div class="filter-grid">
+                    <div class="form-group">
+                        <label for="estado">Estado</label>
+                        <select class="form-control" id="estado" name="estado">
+                            <option value="">Todos los estados</option>
+                            <option value="PENDIENTE">Pendiente</option>
+                            <option value="EN_PROCESO">En Proceso</option>
+                            <option value="COMPLETADO">Completado</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="centro">Centro</label>
+                        <select class="form-control" id="centro" name="centro">
+                            <option value="">Todos los centros</option>
+                            {% for centro in centros_disponibles %}
+                            <option value="{{ centro }}">{{ centro }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="almacen">Almacén</label>
+                        <select class="form-control" id="almacen" name="almacen">
+                            <option value="">Todos los almacenes</option>
+                            {% for almacen in almacenes_disponibles %}
+                            <option value="{{ almacen }}">{{ almacen }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="fecha_inicio_desde">Fecha Inicio (Desde)</label>
+                        <input type="date" class="form-control" id="fecha_inicio_desde" name="fecha_inicio_desde">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="fecha_inicio_hasta">Fecha Inicio (Hasta)</label>
+                        <input type="date" class="form-control" id="fecha_inicio_hasta" name="fecha_inicio_hasta">
+                    </div>
+
+
+                </div>
+            </form>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn-close" onclick="clearFilters()">
+                Limpiar
+            </button>
+            <button type="button" class="btn btn-close-secondary" onclick="applyFilters()">
+                Aplicar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE DETALLE DEL CONTEO -->
+<div id="detalleModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h2 id="detalleModalTitle">Detalle del Conteo</h2>
+            <button class="close" onclick="closeDetalleModal()">&times;</button>
+        </div>
+
+        <div class="modal-body">
+            <!-- Información del Conteo -->
+            <div class="conteo-info-section">
+                <h3>Información General</h3>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <strong>Número:</strong>
+                        <span id="infoNumero">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>Estado:</strong>
+                        <span id="infoEstado" class="status-badge">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>Centro:</strong>
+                        <span id="infoCentro">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>Almacén:</strong>
+                        <span id="infoAlmacen">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>Fecha Inicio:</strong>
+                        <span id="infoFechaInicio">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>Fecha Fin:</strong>
+                        <span id="infoFechaFin">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>Responsable:</strong>
+                        <span id="infoResponsable">-</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>Creado por:</strong>
+                        <span id="infoUsuarioCreacion">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de Colaboradores -->
+            <div class="detalles-section">
+                <h3>Colaboradores Asignados</h3>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Cédula</th>
+                                <th>Nombre</th>
+                                <th>Cargo</th>
+                                <th>Tienda</th>
+                            </tr>
+                        </thead>
+                        <tbody id="colaboradoresTableBody">
+                            <!-- Se llena dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tabla de Detalles -->
+            <div class="detalles-section">
+                <h3>Artículos del Conteo</h3>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID Detalle</th>
+                                <th>Grupo Artículos</th>
+                                <th>Línea</th>
+                                <th>Marca</th>
+                                <th>Observaciones</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detalleTableBody">
+                            <!-- Se llena dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Resumen -->
+                <div class="detalle-summary">
+                    <div class="summary-item">
+                        <strong>Total de artículos:</strong>
+                        <span id="totalArticulos">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de Secuenciales -->
+            <div class="detalles-section">
+                <h3>Secuenciales</h3>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID Detalle</th>
+                                <th>Ubicación</th>
+                                <th>Hasta</th>
+                                <th>Código</th>
+                                <th>Funciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="secuencialesTableBody">
+                            <!-- Se llena dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Loading Spinner -->
+            <div id="detalleLoading" class="loading-spinner" style="display: none;">
+                <div class="spinner"></div>
+                <p>Cargando detalles...</p>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn-close" onclick="closeDetalleModal()">
+                Cerrar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE ANULAR SECUENCIALES -->
+<div id="modalAnularSecuenciales" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h2>Gestionar Secuencias</h2>
+            <button class="close" onclick="cerrarModalAnular()">&times;</button>
+        </div>
+
+        <div class="modal-body">
+            <div class="info-anular">
+                <p><strong>Secuencial ID:</strong> <span id="infoSecuencialId">-</span></p>
+                <p><strong>Detalle Piqueo ID:</strong> <span id="infoDetallePiqueoId">-</span></p>
+            </div>
+
+            <h3>Detalle de Secuencias</h3>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Ubicación</th>
+                            <th>Secuencia</th>
+                            <th>Código</th>
+                            <th>Estado</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detalleSecuenciasTableBody">
+                        <!-- Se llena dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Loading Spinner -->
+            <div id="anularLoading" class="loading-spinner" style="display: none;">
+                <div class="spinner"></div>
+                <p>Cargando secuencias...</p>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn-close" onclick="cerrarModalAnular()">
+                Cerrar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Incluir JavaScript del Dashboard -->
+<script src="{% static 'js/dashboard.js' %}"></script>
+
+<!-- JAVASCRIPT COMPLETO -->
+<script>
+    // ========== VARIABLES GLOBALES ==========
+    let currentFilters = {};
+    let modoEdicionActivo = false; // Nueva variable para controlar el modo edición
+
+    // ========== FUNCIONES DEL MODAL DE FILTROS ==========
+    function openFiltersModal() {
+        document.getElementById('filtersModal').classList.add('show');
+    }
+
+    function closeFiltersModal() {
+        document.getElementById('filtersModal').classList.remove('show');
+    }
+
+    function clearFilters() {
+        document.getElementById('filtersForm').reset();
+        currentFilters = {};
+        updateActiveFilters();
+        // Recargar la página sin filtros
+        window.location.href = window.location.pathname;
+    }
+
+    function applyFilters() {
+        const form = document.getElementById('filtersForm');
+        const formData = new FormData(form);
+
+        currentFilters = {};
+
+        // Recopilar filtros
+        for (let [key, value] of formData.entries()) {
+            if (value.trim() !== '') {
+                currentFilters[key] = value.trim();
+            }
+        }
+
+        console.log('Aplicando filtros:', currentFilters);
+
+        // Hacer petición AJAX
+        fetch(window.location.pathname, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                filtros: currentFilters
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                updateTable(data.conteos);
+                updateStatistics(data.estadisticas);
+                updateActiveFilters();
+                closeFiltersModal();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al aplicar filtros');
+            });
+    }
+
+
+    function updateTable(conteos) {
+        console.log('*****************************************************');
+        console.log('Datos recibidos:', conteos);
+        const tbody = document.getElementById('conteoTableBody');
+        console.log('*****************************************************');
+        tbody.innerHTML = '';
+
+        if (conteos.length === 0) {
+            tbody.innerHTML = `
+            <tr>
+                <td colspan="9" style="text-align: center; padding: 20px; color: #999;">
+                    No se encontraron conteos con los filtros aplicados
+                </td>
+            </tr>
+        `;
+            return;
+        }
+
+        conteos.forEach(conteo => {
+            console.log('Fecha inicio:', conteo.fecha_inicio); // <-- Agrega esto
+            console.log('Fecha fin:', conteo.fecha_fin); // <-- Agrega esto
+
+            // Bloquear acciones en estados donde no aplica gestionar conteo
+            const estadoBloqueado = ['PRIMER_CONTEO', 'SEGUNDO_CONTEO', 'ACTA_PRELIMINAR'].includes(conteo.estado);
+
+            // Ver detalle: deshabilitado solo para estados bloqueados
+            const disabledDetalleAttr = estadoBloqueado ? 'disabled style="background-color: #ccc; cursor: not-allowed;"' : '';
+
+            // Asignar personal: habilitado solo en PENDIENTE o EN_PROCESO y no bloqueado
+            const estadoPermitidoAsignar = ['PENDIENTE', 'EN_PROCESO'].includes(conteo.estado) && !estadoBloqueado;
+            const disabledAsignarAttr = estadoPermitidoAsignar ? '' : 'disabled style="background-color: #ccc; cursor: not-allowed;"';
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+            <td>${conteo.numero_conteo}</td>
+            <td>
+                <span class="status-badge status-${conteo.estado.toLowerCase()}">
+                    ${conteo.estado}
+                </span>
+            </td>
+            <td>${conteo.fecha_inicio}</td>
+            <td>${conteo.fecha_fin}</td>
+            <td>${conteo.nm_responsable}</td>
+            <td>${conteo.usuario_creacion}</td>
+            <td>${conteo.centro}</td>
+            <td>${conteo.almacen}</td>
+            <td>
+                <div class="action-buttons">
+                    <button class="btn btn-icon" title="Ver detalle" onclick="verDetalle(${conteo.id})" ${disabledDetalleAttr}>
+                        <i class="fas fa-file-lines"></i>
+                    </button>
+                    <button class="btn btn-icon" title="Asignar Personal" onclick="redirigirAsignarPersonal(${conteo.id})" ${disabledAsignarAttr}>
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+            </td>
+        `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function updateStatistics(stats) {
+        document.getElementById('totalConteos').textContent = stats.total;
+        document.getElementById('pendientesConteos').textContent = stats.pendientes;
+        document.getElementById('procesoConteos').textContent = stats.en_proceso;
+        document.getElementById('completadosConteos').textContent = stats.completados;
+    }
+
+    function updateActiveFilters() {
+        const activeFiltersDiv = document.getElementById('activeFilters');
+        const filterTagsDiv = document.getElementById('filterTags');
+
+        filterTagsDiv.innerHTML = '';
+
+        if (Object.keys(currentFilters).length === 0) {
+            activeFiltersDiv.style.display = 'none';
+            return;
+        }
+
+        activeFiltersDiv.style.display = 'block';
+
+        const filterLabels = {
+            estado: 'Estado',
+            centro: 'Centro',
+            almacen: 'Almacén',
+            fecha_inicio_desde: 'Fecha Inicio (Desde)',
+            fecha_inicio_hasta: 'Fecha Inicio (Hasta)',
+            fecha_fin_desde: 'Fecha Fin (Desde)',
+            fecha_fin_hasta: 'Fecha Fin (Hasta)'
+        };
+
+        for (const [key, value] of Object.entries(currentFilters)) {
+            const tag = document.createElement('div');
+            tag.className = 'filter-tag';
+            tag.innerHTML = `
+            <span>${filterLabels[key]}: ${value}</span>
+            <button class="remove" onclick="removeFilter('${key}')" title="Eliminar filtro">×</button>
+        `;
+            filterTagsDiv.appendChild(tag);
+        }
+    }
+
+    function removeFilter(filterKey) {
+        delete currentFilters[filterKey];
+
+        // Limpiar el campo del formulario
+        const field = document.getElementById(filterKey);
+        if (field) {
+            field.value = '';
+        }
+
+        // Re-aplicar filtros
+        applyFilters();
+    }
+
+    // ========== FUNCIONES DEL MODAL OF DETALLE ==========
+    function verDetalle(piqueoId) {
+        console.log('Viendo detalle del piqueo:', piqueoId);
+
+        // Mostrar el modal
+        document.getElementById('detalleModal').classList.add('show');
+
+        // Mostrar loading
+        document.getElementById('detalleLoading').style.display = 'block';
+        document.querySelector('.conteo-info-section').style.display = 'none';
+        document.querySelectorAll('.detalles-section').forEach(el => el.style.display = 'none');
+
+        // Hacer petición AJAX
+        fetch(`/conteo/${piqueoId}/detalle/`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': getCookie('csrftoken')
+            }
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error en la petición');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    closeDetalleModal();
+                    return;
+                }
+
+                // Llenar información del conteo
+                llenarInfoConteo(data.conteo);
+
+                // Llenar tabla de detalles
+                llenarTablaDetalles(data.detalles);
+                // Llenar tabla de colaboradores
+                llenarTablaColaboradores(data.colaboradores);
+                // Llenar tabla de Secuencias
+                llenarTablaSecuenciales(data.secuenciales);
+
+                // Actualizar total
+                document.getElementById('totalArticulos').textContent = data.total_detalles;
+
+                // Ocultar loading y mostrar contenido
+                document.getElementById('detalleLoading').style.display = 'none';
+                document.querySelector('.conteo-info-section').style.display = 'block';
+                document.querySelectorAll('.detalles-section').forEach(el => el.style.display = 'block');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al cargar los detalles del conteo');
+                closeDetalleModal();
+            });
+    }
+
+    function llenarTablaColaboradores(colaboradores) {
+        const tbody = document.getElementById('colaboradoresTableBody');
+        tbody.innerHTML = '';
+        if (!colaboradores || colaboradores.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">Sin colaboradores asignados</td></tr>`;
+            return;
+        }
+        colaboradores.forEach(col => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+            <td>${col.cedula}</td>
+            <td>${col.nombre}</td>
+            <td>${col.cargo}</td>
+            <td>${col.tienda}</td>
+        `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function llenarTablaSecuenciales(secuenciales) {
+        const tbody = document.getElementById('secuencialesTableBody');
+        tbody.innerHTML = '';
+        if (!secuenciales || secuenciales.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Sin secuenciales registrados</td></tr>`;
+            return;
+        }
+
+        // Ordenar los secuenciales de menor a mayor por secuencia_hasta
+        const secuencialesOrdenados = secuenciales.sort((a, b) => a.secuencia_hasta - b.secuencia_hasta);
+
+        secuencialesOrdenados.forEach(sec => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+            <td>${sec.detalle_piqueo_id}</td>
+            <td>${sec.ubicacion}</td>
+            <td>
+                <div class="input-container">
+                    <span class="secuencia-valor">${sec.secuencia_hasta}</span>
+                    <input type="number" 
+                           class="secuencia-input" 
+                           value="${sec.secuencia_hasta}" 
+                           min="${obtenerMinimoPermitido(secuencialesOrdenados, sec)}"
+                           max="${sec.secuencia_hasta}"
+                           step="1"
+                           style="display: none;"
+                           onkeydown="return validarTeclado(event)">
+                    <span class="custom-arrow" style="display: none;">▼</span>
+                </div>
+            </td>
+            <td>${sec.codigo}</td>
+            <td>
+                <button class="btn-editar" onclick="editarSecuencia(this)" data-secuencial-id="${sec.secuencial_id}">Editar</button>
+                <button class="btn-gestionar" onclick="abrirModalAnular(${sec.secuencial_id}, ${sec.detalle_piqueo_id})" data-secuencial-id="${sec.secuencial_id}">Gestionar</button>
+                <button class="btn-guardar" data-secuencial-id="${sec.secuencial_id}" onclick="guardarSecuencia(this)" style="display: none;">Guardar</button>
+                <button class="btn-cancelar" onclick="cancelarEdicion(this)" style="display: none;">Cancelar</button>
+            </td>
+        `;
+            tbody.appendChild(row);
+        });
+    }
+    function obtenerMinimoPermitido(secuenciales, secuencialActual) {
+        try {
+            const index = secuenciales.findIndex(s => s.secuencial_id === secuencialActual.secuencial_id);
+            if (index > 0) {
+                const valorAnterior = secuenciales[index - 1].secuencia_hasta;
+                return Math.max(1, valorAnterior + 1);
+            }
+            return 1;
+        } catch (error) {
+            console.error('Error calculando mínimo:', error);
+            return 1;
+        }
+    }
+
+    // ========== FUNCIONES DE EDICIÓN DE SECUENCIAS ==========
+
+    // Función para habilitar la edición
+    function editarSecuencia(botonEditar) {
+        // Si ya hay una edición en curso, mostrar mensaje
+        if (modoEdicionActivo) {
+            alert('Ya hay una secuencia en modo edición. Debe guardar o cancelar la edición actual antes de editar otra.');
+            return;
+        }
+
+        const fila = botonEditar.closest('tr');
+        const valorSpan = fila.querySelector('.secuencia-valor');
+        const input = fila.querySelector('.secuencia-input');
+        const arrow = fila.querySelector('.custom-arrow');
+        const btnGuardar = fila.querySelector('.btn-guardar');
+        const btnCancelar = fila.querySelector('.btn-cancelar');
+
+        // Activar modo edición
+        modoEdicionActivo = true;
+
+        // Deshabilitar todos los botones de editar
+        deshabilitarBotonesEdicion();
+
+        // Mostrar input y flecha personalizada, ocultar span
+        valorSpan.style.display = 'none';
+        input.style.display = 'inline-block';
+        arrow.style.display = 'inline-block';
+
+        // Mostrar botones guardar y cancelar, ocultar editar
+        botonEditar.style.display = 'none';
+        btnGuardar.style.display = 'inline-block';
+        btnCancelar.style.display = 'inline-block';
+
+        // Enfocar el input
+        input.focus();
+
+        // Agregar evento a la flecha personalizada
+        arrow.onclick = function () {
+            decrementarValor(input);
+        };
+    }
+
+    // Función para cancelar la edición
+    function cancelarEdicion(botonCancelar) {
+        const fila = botonCancelar.closest('tr');
+        const valorSpan = fila.querySelector('.secuencia-valor');
+        const input = fila.querySelector('.secuencia-input');
+        const arrow = fila.querySelector('.custom-arrow');
+        const btnEditar = fila.querySelector('.btn-editar');
+        const btnGuardar = fila.querySelector('.btn-guardar');
+
+        // Restaurar valores originales
+        input.value = valorSpan.textContent;
+
+        // Ocultar input y flecha, mostrar span
+        valorSpan.style.display = 'inline-block';
+        input.style.display = 'none';
+        arrow.style.display = 'none';
+
+        // Mostrar botón editar, ocultar guardar y cancelar
+        btnEditar.style.display = 'inline-block';
+        btnGuardar.style.display = 'none';
+        botonCancelar.style.display = 'none';
+
+        // Desactivar modo edición y habilitar botones
+        modoEdicionActivo = false;
+        habilitarBotonesEdicion();
+    }
+
+    // Función para deshabilitar todos los botones de editar
+    function deshabilitarBotonesEdicion() {
+        const botonesEditar = document.querySelectorAll('.btn-editar');
+        botonesEditar.forEach(boton => {
+            boton.disabled = true;
+            boton.style.opacity = '0.5';
+            boton.style.cursor = 'not-allowed';
+        });
+    }
+
+    // Función para habilitar todos los botones de editar
+    function habilitarBotonesEdicion() {
+        const botonesEditar = document.querySelectorAll('.btn-editar');
+        botonesEditar.forEach(boton => {
+            boton.disabled = false;
+            boton.style.opacity = '1';
+            boton.style.cursor = 'pointer';
+        });
+    }
+
+    // Función para decrementar el valor
+    function decrementarValor(input) {
+        const currentValue = parseInt(input.value);
+        const minValue = parseInt(input.min);
+
+        if (currentValue > minValue) {
+            input.value = currentValue - 1;
+
+            // Disparar evento de cambio
+            const event = new Event('change');
+            input.dispatchEvent(event);
+        }
+    }
+
+    // Validar teclado para permitir solo números y teclas de control
+    function validarTeclado(event) {
+        const teclasPermitidas = [
+            'Backspace', 'Delete', 'Tab', 'Escape', 'Enter',
+            'ArrowLeft', 'ArrowRight', 'Home', 'End'
+        ];
+
+        // Permitir teclas de control
+        if (teclasPermitidas.includes(event.key)) {
+            return true;
+        }
+
+        // Permitir solo números
+        if (!/^\d$/.test(event.key)) {
+            event.preventDefault();
+            return false;
+        }
+
+        return true;
+    }
+
+    // Función para guardar los cambios en la base de datos
+    async function guardarSecuencia(botonGuardar) {
+        const fila = botonGuardar.closest('tr');
+        const valorSpan = fila.querySelector('.secuencia-valor');
+        const input = fila.querySelector('.secuencia-input');
+        const arrow = fila.querySelector('.custom-arrow');
+        const btnEditar = fila.querySelector('.btn-editar');
+        const btnCancelar = fila.querySelector('.btn-cancelar');
+        const nuevoValor = input.value;
+
+        // Obtener el detalle_piqueo_id de la primera columna
+        const detallePiqueoId = fila.cells[0].textContent;
+
+        // Obtener el secuencial_id del data attribute
+        const secuencialId = botonGuardar.getAttribute('data-secuencial-id');
+
+        console.log(`🔧 Actualizando - Secuencial ID: ${secuencialId}, Detalle ID: ${detallePiqueoId}, Nuevo valor: ${nuevoValor}`);
+
+        // Validar que el valor no esté vacío
+        if (!nuevoValor || nuevoValor.trim() === '') {
+            alert('El valor no puede estar vacío');
+            return;
+        }
+
+        // Validar que sea un número válido
+        if (isNaN(nuevoValor) || parseInt(nuevoValor) < 0) {
+            alert('Por favor ingrese un número válido');
+            return;
+        }
+
+        // Validar que no sea mayor al valor máximo permitido
+        const valorMaximo = parseInt(input.max);
+        if (parseInt(nuevoValor) > valorMaximo) {
+            alert(`El valor no puede ser mayor a ${valorMaximo}`);
+            return;
+        }
+
+        // Validar que no sea menor al valor mínimo permitido
+        const valorMinimo = parseInt(input.min);
+        if (parseInt(nuevoValor) < valorMinimo) {
+            alert(`El valor no puede ser menor a ${valorMinimo}`);
+            return;
+        }
+
+        try {
+            // Mostrar indicador de carga
+            botonGuardar.textContent = 'Guardando...';
+            botonGuardar.disabled = true;
+
+            // Llamada AJAX para actualizar en la base de datos
+            const response = await fetch('/actualizar-secuencia/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({
+                    detalle_piqueo_id: parseInt(detallePiqueoId),
+                    secuencial_id: parseInt(secuencialId),
+                    secuencia_hasta: parseInt(nuevoValor)
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Actualización exitosa - actualizar la interfaz
+                valorSpan.textContent = nuevoValor;
+                valorSpan.style.display = 'inline-block';
+                input.style.display = 'none';
+                arrow.style.display = 'none';
+
+                botonGuardar.style.display = 'none';
+                btnCancelar.style.display = 'none';
+                btnEditar.style.display = 'inline-block';
+
+                // Actualizar el atributo max para futuras ediciones
+                input.max = nuevoValor;
+
+                // Desactivar modo edición y habilitar botones
+                modoEdicionActivo = false;
+                habilitarBotonesEdicion();
+
+                alert('Secuencia actualizada correctamente');
+
+            } else {
+                throw new Error(data.message || 'Error al actualizar');
+            }
+
+        } catch (error) {
+            console.error('Error al actualizar secuencia:', error);
+            alert('Error al actualizar la secuencia: ' + error.message);
+
+            // Restaurar botón guardar
+            botonGuardar.textContent = 'Guardar';
+            botonGuardar.disabled = false;
+        }
+    }
+
+    // Función auxiliar para obtener el token CSRF de Django
+    function getCsrfToken() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
+
+    // ========== FUNCIONES MODIFICADAS PARA IMPRIMIR SOLO SECUENCIALES ACTIVOS ==========
+    function imprimirZona(detallePiqueoId) {
+        // Primero validar que existan colaboradores asignados
+        const colaboradoresTbody = document.getElementById('colaboradoresTableBody');
+        const tieneColaboradores = colaboradoresTbody.querySelectorAll('tr').length > 0 &&
+            !colaboradoresTbody.innerHTML.includes('Sin colaboradores asignados');
+
+        if (!tieneColaboradores) {
+            alert('❌ No se puede imprimir. Verifique que haya colaboradores asignados.');
+            return;
+        }
+
+        // Ahora necesitamos obtener los secuenciales ACTIVOS para este detalle
+        mostrarLoadingImpresion();
+
+        // Hacer petición AJAX para obtener secuenciales ACTIVOS
+        fetch(`/obtener-secuenciales-activos/${detallePiqueoId}/`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': getCookie('csrftoken')
+            }
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error en la petición');
+                }
+                return response.json();
+            })
+            .then(data => {
+                ocultarLoadingImpresion();
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                if (!data.secuenciales || data.secuenciales.length === 0) {
+                    alert('❌ No hay secuenciales ACTIVOS para imprimir.');
+                    return;
+                }
+
+                // Verificar si hay secuenciales activos
+                const tieneSecuencialesActivos = data.secuenciales.length > 0;
+
+                if (!tieneSecuencialesActivos) {
+                    alert('❌ No se puede imprimir. No hay secuenciales ACTIVOS para este detalle.');
+                    return;
+                }
+
+                // Si todo está bien, proceder con la impresión
+                console.log(`✅ ${data.secuenciales.length} secuenciales activos encontrados para imprimir`);
+                imprimirZonaConSecuencialesActivos(detallePiqueoId, data.secuenciales);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                ocultarLoadingImpresion();
+                alert('Error al verificar secuenciales activos');
+            });
+    }
+
+    function imprimirZonaConSecuencialesActivos(detallePiqueoId, secuencialesActivos) {
+        console.log('Secuenciales activos para imprimir:', secuencialesActivos);
+        ocultarLoadingImpresion();
+
+        if (!Array.isArray(secuencialesActivos) || secuencialesActivos.length === 0) {
+            alert('❌ No hay secuenciales ACTIVOS para imprimir.');
+            return;
+        }
+
+        const secuencialIds = secuencialesActivos
+            .map(secuencia => secuencia.secuencial_deta_id)
+            .filter(secuencialDetaId => Boolean(secuencialDetaId));
+
+        if (secuencialIds.length === 0) {
+            alert('❌ No se encontraron secuencias válidas para imprimir.');
+            return;
+        }
+
+        const idsParam = encodeURIComponent(secuencialIds.join(','));
+        const primeraSecuencia = secuencialIds[0];
+        const popupUrl = `/imprimir-zona-secuencia/${primeraSecuencia}/?queue=1&ids=${idsParam}&index=0`;
+        const ventanaImpresion = window.open(popupUrl, '_blank');
+
+        if (!ventanaImpresion) {
+            alert('⚠️ El navegador bloqueó la ventana de impresión. Permita ventanas emergentes e intente nuevamente.');
+        }
+    }
+
+    function mostrarLoadingImpresion() {
+        // Crear overlay de carga si no existe
+        if (!document.getElementById('loadingImpresion')) {
+            const loading = document.createElement('div');
+            loading.id = 'loadingImpresion';
+            loading.innerHTML = `
+            <div style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            ">
+                <div style="
+                    background: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    text-align: center;
+                ">
+                    <div class="spinner" style="
+                        border: 3px solid #e4e4e4;
+                        border-top: 3px solid #052F62;
+                        border-radius: 50%;
+                        width: 35px;
+                        height: 35px;
+                        animation: spin 1s linear infinite;
+                        margin: 0 auto 15px;
+                    "></div>
+                    <p style="color: #666; margin: 0;">Verificando secuenciales activos...</p>
+                </div>
+            </div>
+        `;
+            document.body.appendChild(loading);
+        }
+    }
+
+    function ocultarLoadingImpresion() {
+        const loading = document.getElementById('loadingImpresion');
+        if (loading) {
+            document.body.removeChild(loading);
+        }
+    }
+
+    function llenarInfoConteo(conteo) {
+        document.getElementById('detalleModalTitle').textContent = `Detalle del Conteo: ${conteo.numero_conteo}`;
+        document.getElementById('infoNumero').textContent = conteo.numero_conteo;
+        document.getElementById('infoCentro').textContent = conteo.centro;
+        document.getElementById('infoAlmacen').textContent = conteo.almacen;
+        document.getElementById('infoFechaInicio').textContent = conteo.fecha_inicio;
+        document.getElementById('infoFechaFin').textContent = conteo.fecha_fin;
+        document.getElementById('infoResponsable').textContent = conteo.responsable;
+        document.getElementById('infoUsuarioCreacion').textContent = conteo.usuario_creacion;
+
+        // Estado con clase CSS
+        const estadoBadge = document.getElementById('infoEstado');
+        estadoBadge.textContent = conteo.estado;
+        estadoBadge.className = `status-badge status-${conteo.estado.toLowerCase()}`;
+    }
+
+    function llenarTablaDetalles(detalles) {
+        const tbody = document.getElementById('detalleTableBody');
+        tbody.innerHTML = '';
+
+        if (detalles.length === 0) {
+            tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 20px; color: #999;">
+                    No hay detalles de artículos registrados para este conteo
+                </td>
+            </tr>
+        `;
+            return;
+        }
+
+        detalles.forEach(detalle => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+            <td>${detalle.detalle_id}</td>
+            <td><strong>${detalle.grupo_articulos}</strong></td>
+            <td>${detalle.linea}</td>
+            <td>${detalle.marca}</td>
+            <td>${detalle.observaciones}</td>
+            <td>
+                <button type="button" 
+                        class="btn-icon" 
+                        title="Imprimir Zona" 
+                        onclick="imprimirZona(${detalle.detalle_id})">
+                    <i class="fas fa-print"></i>
+                </button>
+            </td>
+        `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function closeDetalleModal() {
+        document.getElementById('detalleModal').classList.remove('show');
+        // Resetear modo edición
+        modoEdicionActivo = false;
+        // Recargar solo los datos de la tabla
+        recargarDatos();
+    }
+
+    function recargarDatos() {
+        console.log('🔄 Iniciando recarga de datos...');
+        fetch(window.location.pathname, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': getCookie('csrftoken')
+            }
+        })
+            .then(response => {
+                console.log('📡 Respuesta recibida:', response);
+                return response.json();
+            })
+            .then(data => {
+                console.log('📦 Datos parseados:', data);
+                updateTable(data.conteos);
+                updateStatistics(data.estadisticas);
+            })
+            .catch(error => {
+                console.error('❌ Error al recargar:', error);
+                // Si falla, recargar la página completa
+                window.location.reload();
+            });
+    }
+
+
+    // ========== FUNCIONES AUXILIARES ==========
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    function redirigirAsignarPersonal(piqueoId) {
+        window.location.href = `/asigna-conteo-colaborador/${piqueoId}/`;
+    }
+
+    // ========== EVENT LISTENERS ==========
+    // Cerrar modales con clicks fuera
+    window.onclick = function (event) {
+        const filtersModal = document.getElementById('filtersModal');
+        const detalleModal = document.getElementById('detalleModal');
+
+        if (event.target === filtersModal) {
+            closeFiltersModal();
+        }
+        if (event.target === detalleModal) {
+            closeDetalleModal();
+        }
+    }
+
+    // Cerrar modales con tecla ESC
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            closeFiltersModal();
+            closeDetalleModal();
+        }
+    });
+
+    // ========== FUNCIONES PARA ANULAR SECUENCIAS ==========
+
+    function abrirModalAnular(secuencialId, detallePiqueoId) {
+        console.log(`🔍 Abriendo modal anular - Secuencial: ${secuencialId}, Detalle: ${detallePiqueoId}`);
+
+        // Mostrar el modal
+        document.getElementById('modalAnularSecuenciales').classList.add('show');
+
+        // Actualizar información del header
+        document.getElementById('infoSecuencialId').textContent = secuencialId;
+        document.getElementById('infoDetallePiqueoId').textContent = detallePiqueoId;
+
+        // Mostrar loading
+        document.getElementById('anularLoading').style.display = 'block';
+        document.getElementById('detalleSecuenciasTableBody').innerHTML = '';
+
+        // Hacer petición AJAX para obtener detalle de secuencias
+        fetch(`/obtener-detalle-secuencias/${secuencialId}/`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': getCookie('csrftoken')
+            }
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error en la petición');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    cerrarModalAnular();
+                    return;
+                }
+
+                // Llenar tabla de detalle de secuencias
+                llenarTablaDetalleSecuencias(data.secuencias);
+
+                // Ocultar loading
+                document.getElementById('anularLoading').style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al cargar el detalle de secuencias');
+                document.getElementById('anularLoading').style.display = 'none';
+            });
+    }
+
+    function cerrarModalAnular() {
+        document.getElementById('modalAnularSecuenciales').classList.remove('show');
+    }
+
+    function llenarTablaDetalleSecuencias(secuencias) {
+        const tbody = document.getElementById('detalleSecuenciasTableBody');
+        tbody.innerHTML = '';
+
+        if (!secuencias || secuencias.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No hay secuencias para este secuencial</td></tr>`;
+            return;
+        }
+
+        secuencias.forEach(sec => {
+            const row = document.createElement('tr');
+            const estadoClass = sec.estado === 'ANULADO' ? 'status-rechazado' : 'status-activo';
+
+            // Definir botones según el estado
+            let botonesHtml = '';
+            if (sec.estado === 'ANULADO') {
+                // Si está anulado, mostrar solo botón Activar
+                botonesHtml = `
+                <button class="btn-activar-detalle" 
+                        onclick="activarSecuenciaDetalle(${sec.secuencial_deta_id}, this)">
+                    Activar
+                </button>
+            `;
+            } else {
+                // Si está activo, mostrar solo botón Anular
+                botonesHtml = `
+                <button class="btn-anular-detalle" 
+                        onclick="anularSecuenciaDetalle(${sec.secuencial_deta_id}, this)">
+                    Anular
+                </button>
+            `;
+            }
+
+            row.innerHTML = `
+            <td>${sec.ubicacion}</td>
+            <td>${sec.secuencia}</td>
+            <td>${sec.codigo}</td>
+            <td><span class="status-badge ${estadoClass}">${sec.estado}</span></td>
+            <td>${botonesHtml}</td>
+        `;
+            tbody.appendChild(row);
+        });
+    }
+
+    async function anularSecuenciaDetalle(secuencialDetaId, boton) {
+        if (!confirm('¿Está seguro que desea anular esta secuencia?')) {
+            return;
+        }
+
+        console.log(`🚫 Anulando secuencia detalle ID: ${secuencialDetaId}`);
+
+        // Deshabilitar botón mientras procesa
+        boton.disabled = true;
+        boton.textContent = 'Procesando...';
+
+        try {
+            const response = await fetch('/anular-secuencia-detalle/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({
+                    secuencial_deta_id: secuencialDetaId
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ Secuencia anulada correctamente');
+
+                // Actualizar el estado visual del botón
+                boton.textContent = 'Anulado';
+                boton.disabled = true;
+
+                // Actualizar el badge de estado en la fila
+                const fila = boton.closest('tr');
+                const estadoBadge = fila.querySelector('.status-badge');
+                if (estadoBadge) {
+                    estadoBadge.textContent = 'ANULADO';
+                    estadoBadge.className = 'status-badge status-rechazado';
+                }
+            } else {
+                throw new Error(data.message || 'Error al anular secuencia');
+            }
+
+        } catch (error) {
+            console.error('Error al anular secuencia:', error);
+            alert('❌ Error al anular secuencia: ' + error.message);
+
+            // Restaurar botón en caso de error
+            boton.disabled = false;
+            boton.textContent = 'Anular';
+        }
+    }
+
+    async function activarSecuenciaDetalle(secuencialDetaId, boton) {
+        if (!confirm('¿Está seguro que desea activar esta secuencia?')) {
+            return;
+        }
+
+        console.log(`✅ Activando secuencia detalle ID: ${secuencialDetaId}`);
+
+        // Deshabilitar botón mientras procesa
+        boton.disabled = true;
+        boton.textContent = 'Procesando...';
+
+        try {
+            const response = await fetch('/activar-secuencia-detalle/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify({
+                    secuencial_deta_id: secuencialDetaId
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ Secuencia activada correctamente');
+
+                // Actualizar el botón a "Anular"
+                boton.className = 'btn-anular-detalle';
+                boton.textContent = 'Anular';
+                boton.disabled = false;
+                boton.onclick = function () {
+                    anularSecuenciaDetalle(secuencialDetaId, this);
+                };
+
+                // Actualizar el badge de estado en la fila
+                const fila = boton.closest('tr');
+                const estadoBadge = fila.querySelector('.status-badge');
+                if (estadoBadge) {
+                    estadoBadge.textContent = 'ACTIVO';
+                    estadoBadge.className = 'status-badge status-activo';
+                }
+            } else {
+                throw new Error(data.message || 'Error al activar secuencia');
+            }
+
+        } catch (error) {
+            console.error('Error al activar secuencia:', error);
+            alert('❌ Error al activar secuencia: ' + error.message);
+
+            // Restaurar botón en caso de error
+            boton.disabled = false;
+            boton.textContent = 'Activar';
+        }
+    }
+
+</script>
+
+<!-- ESTILOS CSS -->
+<style>
+    /* ========== ESTILOS BASE ========== */
+
+    .action-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding: 12px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+    }
+
+    .btn {
+        padding: 8px 12px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        font-size: 12px;
+        height: 32px;
+    }
+
+    .btn-editar {
+        padding: 5px 10px !important;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        align-items: center;
+        background: #052F62;
+        color: white;
+        font-size: 11px;
+    }
+
+    .btn-editar:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-editar:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+    }
+
+    .btn-cancelar {
+        background: #6c757d;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 3px;
+        cursor: pointer;
+        margin-left: 5px;
+        font-size: 11px;
+    }
+
+    .btn-cancelar:hover {
+        background: #5a6268;
+        transform: translateY(-1px);
+    }
+
+    .btn-primary:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+
+    .btn-secondary:hover {
+        background: #545b62;
+        transform: translateY(-1px);
+    }
+
+    .btn-close {
+        width: auto;
+        min-width: 80px;
+        background: #950404;
+        color: white;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-close:hover {
+        background: #740400;
+        transform: translateY(-1px);
+    }
+
+    .btn-close-secondary {
+        width: auto;
+        min-width: 80px;
+        background: #052F62;
+        color: white;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-close-secondary:hover {
+        background: #041d3d;
+        transform: translateY(-1px);
+    }
+
+    .btn-outline {
+        background: #950404;
+        color: #ffffffff;
+    }
+
+    .btn-outline:hover {
+        background: #740400;
+        transform: translateY(-1px);
+    }
+
+    .btn-icon {
+        padding: 3px 5px;
+        border: none;
+        background: #052F62;
+        cursor: pointer;
+        border-radius: 3px;
+        font-size: 10px;
+        width: 27px;
+        height: 27px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-icon:hover {
+        background: #031B38;
+        transform: scale(1.05);
+    }
+
+    .btn-icon:disabled,
+    .btn-icon.btn-disabled,
+    .btn-icon.btn-disabled:hover,
+    .btn.btn-icon:disabled,
+    .btn.btn-icon:disabled:hover {
+        background: #ccc !important;
+        color: #666 !important;
+        cursor: not-allowed !important;
+        transform: none !important;
+        opacity: 0.8;
+    }
+
+    /* ========== ESTILOS DEL MODAL BASE ========== */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        animation: fadeIn 0.3s ease;
+    }
+
+    .modal.show {
+        display: block;
+    }
+
+    .modal-content {
+        background-color: white;
+        margin: 3% auto;
+        padding: 0;
+        border-radius: 10px;
+        width: 95%;
+        max-width: 650px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        animation: slideIn 0.3s ease;
+    }
+
+    .modal-large {
+        max-width: 900px;
+        width: 98%;
+    }
+
+    .modal-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid #e9ecef;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-header h2 {
+        color: #333;
+        margin: 0;
+        font-size: 18px;
+    }
+
+    .close {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: #999;
+        padding: 0;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: all 0.2s ease;
+    }
+
+    .close:hover {
+        background: #f8f9fa;
+        color: #333;
+    }
+
+    .modal-body {
+        padding: 15px 20px;
+    }
+
+    .modal-footer {
+        padding: 15px 20px;
+        border-top: 1px solid #e9ecef;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+
+    /* ========== FORMULARIO DE FILTROS ========== */
+    .filter-form {
+        display: grid;
+        gap: 15px;
+    }
+
+    .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group label {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+        font-size: 12px;
+    }
+
+    .form-control {
+        padding: 8px 10px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        font-size: 12px;
+        transition: all 0.2s ease;
+        background: white;
+        height: 36px;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: #052F62;
+        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+    }
+
+    /* ========== FILTROS ACTIVOS ========== */
+    .active-filters {
+        margin: 15px 0;
+        padding: 12px;
+        background: white;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .active-filters h3 {
+        color: #333;
+        margin-bottom: 8px;
+        font-size: 14px;
+    }
+
+    .filter-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .filter-tag {
+        background: #e4e4e4;
+        color: #052F62;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 11px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .filter-tag .remove {
+        background: none;
+        border: none;
+        color: #052F62;
+        cursor: pointer;
+        font-size: 12px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .filter-tag .remove:hover {
+        background: rgba(25, 118, 210, 0.1);
+    }
+
+    /* ========== MODAL DE DETALLE ========== */
+    .conteo-info-section {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+    }
+
+    .conteo-info-section h3 {
+        margin-bottom: 12px;
+        color: #333;
+        font-size: 14px;
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 10px;
+    }
+
+    .info-item {
+        background: #f1f1f1;
+        padding: 8px 12px;
+        border-radius: 5px;
+        border-left: 3px solid #052F62;
+    }
+
+    .info-item strong {
+        color: #555;
+        display: block;
+        margin-bottom: 3px;
+        font-size: 10px;
+        text-transform: uppercase;
+    }
+
+    .info-item span {
+        color: #333;
+        font-weight: 500;
+        font-size: 12px;
+    }
+
+    .detalles-section {
+        margin-bottom: 15px;
+    }
+
+    .detalles-section h3 {
+        margin-bottom: 10px;
+        color: #333;
+        font-size: 14px;
+    }
+
+    .detalle-summary {
+        background: #e4e4e4;
+        padding: 10px;
+        border-radius: 5px;
+        margin-top: 10px;
+        text-align: center;
+    }
+
+    .summary-item {
+        font-size: 13px;
+        color: #052F62;
+    }
+
+    .summary-item strong {
+        font-weight: 600;
+    }
+
+    /* Espacio adicional específico para cada tabla */
+    .detalles-section:has(#colaboradoresTableBody) {
+        margin-bottom: 15px;
+    }
+
+    .detalles-section:has(#detalleTableBody) {
+        margin-bottom: 15px;
+    }
+
+    .detalles-section:has(#secuencialesTableBody) {
+        margin-bottom: 15px;
+    }
+
+    /* ========== LOADING SPINNER ========== */
+    .loading-spinner {
+        text-align: center;
+        padding: 30px;
+    }
+
+    .spinner {
+        border: 3px solid #e4e4e4;
+        border-top: 3px solid #052F62;
+        border-radius: 50%;
+        width: 35px;
+        height: 35px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    .loading-spinner p {
+        color: #666;
+        margin: 0;
+        font-size: 13px;
+    }
+
+    /* ========== TABLA DE DATOS ========== */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+        font-size: 11px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 6px 8px;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+        line-height: 1.2;
+    }
+
+    .data-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        color: #333;
+        font-size: 11px;
+        padding: 8px 8px;
+    }
+
+    .data-table tr:hover {
+        background: #f5f7fa;
+    }
+
+    .detalles-section .data-table {
+        margin-top: 0;
+    }
+
+    .detalles-section .data-table tbody tr:nth-child(even) {
+        background-color: #f8f9fa;
+    }
+
+    .detalles-section .data-table tbody tr:hover {
+        background-color: #e3f2fd;
+    }
+
+    /* ========== BADGES DE ESTADO ========== */
+    .status-badge {
+        padding: 3px 6px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 500;
+    }
+
+    .status-activo {
+        background: #c3dbf8ff;
+        color: #052F62;
+    }
+
+    .status-pendiente {
+        background: #fff3cd;
+        color: #856404;
+    }
+
+    .status-completado {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .status-en_proceso {
+        background: #c3dbf8ff;
+        color: #052F62;
+    }
+
+    /* ========== ESTILOS PARA SECUENCIALES ========== */
+    /* Ocultar flechas en todos los inputs number */
+    .secuencia-input::-webkit-outer-spin-button,
+    .secuencia-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    .secuencia-input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+
+    .input-container {
+        position: relative;
+        display: inline-block;
+    }
+
+    .custom-arrow {
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+        color: #666;
+        font-size: 9px;
+    }
+
+    /* ESTILOS ESPECÍFICOS boton editar y gestionar */
+    #secuencialesTableBody .btn-editar,
+    #secuencialesTableBody .btn-gestionar,
+    #secuencialesTableBody .btn-guardar,
+    #secuencialesTableBody .btn-cancelar {
+        padding: 4px 8px !important;
+        border: none;
+        cursor: pointer;
+        border-radius: 3px;
+        font-size: 10px;
+        width: auto;
+        height: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 1px;
+    }
+
+    #secuencialesTableBody .btn-editar {
+        background: #052F62 !important;
+        color: white !important;
+    }
+
+    #secuencialesTableBody .btn-editar:hover {
+        background: #031B38 !important;
+        transform: none !important;
+    }
+
+    #secuencialesTableBody .btn-gestionar {
+        background: #950404 !important;
+        color: white !important;
+    }
+
+    #secuencialesTableBody .btn-gestionar:hover {
+        background: #740400 !important;
+        transform: none !important;
+    }
+
+    #secuencialesTableBody .btn-guardar {
+        background: #155724 !important;
+        color: white !important;
+    }
+
+    #secuencialesTableBody .btn-guardar:hover {
+        background: rgba(3, 70, 51, 1) !important;
+        transform: none !important;
+    }
+
+    #secuencialesTableBody .btn-cancelar {
+        background: #950404 !important;
+        color: white !important;
+    }
+
+    #secuencialesTableBody .btn-cancelar:hover {
+        background: #700202ff !important;
+        transform: none !important;
+    }
+
+    /* ========== ANIMACIONES ========== */
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-40px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* ========== STAT-CARD BASE ========== */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+    }
+
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-left: 4px solid #052F62;
+        transition: all 0.3s ease;
+    }
+
+    .stat-card h3 {
+        font-size: 2em;
+        margin: 0;
+        color: #052F62;
+        font-weight: bold;
+    }
+
+    .stat-card small {
+        color: #666;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    /* ========== MEDIA QUERY ESPECÍFICA PARA 1024x768 ========== */
+    @media screen and (max-width: 1024px) and (max-height: 768px) {
+
+        /* Ajustes generales para pantalla pequeña */
+        body {
+            font-size: 11px;
+            overflow-x: hidden;
+        }
+
+        /* Contenido principal más compacto */
+        .main-content {
+            padding: 12px;
+            margin-top: 25px;
+        }
+
+        .content-header {
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .content-header h1 {
+            font-size: 20px;
+        }
+
+        .content-header p {
+            font-size: 12px;
+        }
+
+        /* Cards más compactos */
+        .card {
+            padding: 12px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+        }
+
+        .card h2,
+        .card h3 {
+            font-size: 15px;
+            margin-bottom: 10px;
+        }
+
+        /* ========== STAT-CARD AJUSTADOS PARA 1024x768 ========== */
+        .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            padding: 12px 8px;
+            border-radius: 8px;
+            border-left: 3px solid #052F62;
+        }
+
+        .stat-card h3 {
+            font-size: 1.5em;
+            margin-bottom: 4px;
+        }
+
+        .stat-card small {
+            font-size: 11px;
+        }
+
+        /* Tablas ultra compactas */
+        .data-table {
+            font-size: 10px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 5px 6px;
+        }
+
+        .data-table th {
+            font-size: 10px;
+            padding: 6px 6px;
+        }
+
+        /* Formularios más compactos */
+        .filter-grid {
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+        }
+
+        .form-control {
+            padding: 6px 8px;
+            font-size: 11px;
+            height: 32px;
+        }
+
+        .form-group label {
+            font-size: 11px;
+        }
+
+        /* Botones más pequeños */
+        .btn {
+            padding: 6px 10px;
+            font-size: 11px;
+            height: 30px;
+        }
+
+        .btn-icon {
+            width: 22px !important;
+            height: 22px !important;
+            font-size: 9px !important;
+        }
+
+        /* Modales optimizados */
+        .modal-content {
+            margin: 2% auto;
+            padding: 12px;
+            max-height: 92vh;
+        }
+
+        .modal-large {
+            width: 97%;
+        }
+
+        .modal-header {
+            padding: 12px 15px;
+        }
+
+        .modal-body {
+            padding: 12px 15px;
+        }
+
+        .modal-footer {
+            padding: 12px 15px;
+        }
+
+        /* Información más compacta */
+        .info-grid {
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 8px;
+        }
+
+        .info-item {
+            padding: 6px 10px;
+        }
+
+        .info-item strong {
+            font-size: 9px;
+        }
+
+        .info-item span {
+            font-size: 11px;
+        }
+
+        /* Asegurar que no haya scroll horizontal */
+        .table-responsive {
+            overflow-x: auto;
+            max-width: 100%;
+        }
+
+        /* Mensajes más compactos */
+        .mensaje-tabla-vacia {
+            padding: 12px;
+            font-size: 11px;
+        }
+
+        /* Botones de acción en formularios */
+        .form-actions {
+            margin-top: 12px;
+            padding-top: 12px;
+        }
+
+        /* Ajustar barra de acciones */
+        .action-bar {
+            padding: 10px;
+            margin-bottom: 12px;
+        }
+    }
+
+    /* ========== AJUSTES ESPECÍFICOS PARA ALTURA 768px ========== */
+    @media screen and (max-width: 1024px) and (max-height: 768px) and (min-width: 769px) {
+
+        /* Optimizar espacio vertical */
+        .main-content {
+            min-height: calc(100vh - 70px);
+        }
+
+        .modal-content {
+            max-height: 94vh;
+            margin: 1% auto;
+        }
+
+        /* ========== STAT-CARD MÁS COMPACTOS PARA ALTURA 768px ========== */
+        .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+        }
+
+        .stat-card {
+            padding: 10px 6px;
+        }
+
+        .stat-card h3 {
+            font-size: 1.4em;
+        }
+
+        .stat-card small {
+            font-size: 10px;
+        }
+
+        /* Compactar aún más los elementos */
+        .card {
+            padding: 10px;
+        }
+
+        .form-section {
+            padding: 12px;
+            margin-bottom: 15px;
+        }
+
+        .tabla-articulos {
+            font-size: 9px;
+        }
+
+        .tabla-articulos th,
+        .tabla-articulos td {
+            padding: 4px 5px;
+        }
+
+        /* Reducir aún más las tablas en modales */
+        #secuencialesTableBody .btn-editar,
+        #secuencialesTableBody .btn-gestionar,
+        #secuencialesTableBody .btn-guardar,
+        #secuencialesTableBody .btn-cancelar {
+            font-size: 9px !important;
+            padding: 3px 6px !important;
+        }
+    }
+
+    /* ========== RESPONSIVE DESIGN PARA MÓVILES ========== */
+    @media (max-width: 768px) {
+        .form-row {
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group {
+            min-width: 100%;
+        }
+
+        .form-actions {
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .btn {
+            width: 100%;
+            justify-content: center;
+        }
+
+        .btn-igual {
+            min-width: 100%;
+        }
+
+        .form-actions .btn-igual+.btn-igual {
+            margin-left: 0;
+        }
+
+        .tabla-articulos-container {
+            overflow-x: auto;
+        }
+
+        .tabla-articulos {
+            min-width: 600px;
+            font-size: 10px;
+        }
+
+        /* ========== STAT-CARD PARA MÓVILES ========== */
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .stat-card {
+            padding: 15px 10px;
+        }
+
+        .stat-card h3 {
+            font-size: 1.6em;
+        }
+
+        .stat-card small {
+            font-size: 11px;
+        }
+
+        /* Modales en móviles */
+        .modal-content {
+            margin: 2% auto;
+            width: 98%;
+            padding: 12px;
+        }
+
+        /* Cards en móviles */
+        .card {
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        /* Ajustes específicos para formularios en móviles */
+        #modalAgregar .form-row {
+            flex-direction: column;
+        }
+
+        #modalAgregar .form-row .form-group[style*="flex: 1"] {
+            max-width: 100%;
+        }
+
+        /* Botones de acción en móviles */
+        .action-buttons {
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .btn-primary,
+        .btn-success,
+        .btn-info {
+            min-width: 100%;
+        }
+    }
+
+    /* ========== AJUSTES ESPECÍFICOS PARA MÓVILES PEQUEÑOS ========== */
+    @media (max-width: 480px) {
+        .main-content {
+            padding: 8px;
+        }
+
+        .content-header {
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .content-header h1 {
+            font-size: 18px;
+        }
+
+        .content-header p {
+            font-size: 11px;
+        }
+
+        .card {
+            padding: 8px;
+        }
+
+        .tabla-articulos {
+            min-width: 500px;
+            font-size: 9px;
+        }
+
+        .modal>div {
+            margin: 1% auto;
+            padding: 10px;
+        }
+
+        .btn {
+            padding: 5px 8px;
+            font-size: 11px;
+            height: 28px;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 4px 6px;
+            font-size: 11px;
+            height: 28px;
+        }
+
+        /* ========== STAT-CARD PARA MÓVILES PEQUEÑOS ========== */
+        .stats-grid {
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+
+        .stat-card {
+            padding: 12px 8px;
+        }
+
+        .stat-card h3 {
+            font-size: 1.5em;
+        }
+
+        .stat-card small {
+            font-size: 10px;
+        }
+    }
+
+    /* ========== MEJORAS VISUALES ========== */
+    .icon {
+        font-style: normal;
+    }
+
+    .content-header {
+        margin-bottom: 30px;
+    }
+
+    .content-header h1 {
+        color: #ffffffff;
+        margin: 0 0 10px 0;
+    }
+
+    .content-header p {
+        color: #e4e4e4ff;
+        margin: 0;
+    }
+
+    /* ========== HOVER EFFECTS ========== */
+    .btn:hover {
+        transform: translateY(-1px);
+    }
+
+    .btn-icon:hover {
+        transform: scale(1.05);
+    }
+
+    .data-table tbody tr:hover {
+        background: #f8f9fa !important;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        transition: all 0.2s ease;
+    }
+
+    /* ========== ACCESIBILIDAD ========== */
+    .btn:focus,
+    .form-control:focus,
+    .close:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+    }
+
+    .modal-content:focus {
+        outline: none;
+    }
+
+    /* ========== UTILIDADES ========== */
+    .text-center {
+        text-align: center;
+    }
+
+    .text-muted {
+        color: #666;
+    }
+
+    .mb-0 {
+        margin-bottom: 0;
+    }
+
+    .mt-20 {
+        margin-top: 20px;
+    }
+
+    .p-20 {
+        padding: 20px;
+    }
+
+    .d-none {
+        display: none;
+    }
+
+    .d-block {
+        display: block;
+    }
+
+    .d-flex {
+        display: flex;
+    }
+
+    .justify-center {
+        justify-content: center;
+    }
+
+    .align-center {
+        align-items: center;
+    }
+
+    .gap-10 {
+        gap: 10px;
+    }
+
+    .w-100 {
+        width: 100%;
+    }
+
+    .h-100 {
+        height: 100%;
+    }
+
+    /* ========== ESTILOS PARA BOTÓN GESTIONAR ========== */
+    .btn-gestionar {
+        background: #950404 !important;
+        color: white !important;
+        border: none;
+        padding: 5px 10px !important;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 11px;
+        margin-left: 3px;
+    }
+
+    .btn-gestionar:hover {
+        background: #740400 !important;
+        transform: translateY(-1px);
+    }
+
+    /* ========== ESTILOS PARA BOTONES DENTRO DEL MODAL DE GESTIONAR SECUENCIAS ========== */
+    #detalleSecuenciasTableBody .btn-anular-detalle,
+    #detalleSecuenciasTableBody .btn-activar-detalle {
+        padding: 5px 10px !important;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 11px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 1px;
+    }
+
+    #detalleSecuenciasTableBody .btn-anular-detalle {
+        background: #950404 !important;
+        color: white !important;
+    }
+
+    #detalleSecuenciasTableBody .btn-anular-detalle:hover:not(:disabled) {
+        background: #740400 !important;
+        transform: translateY(-1px);
+    }
+
+    #detalleSecuenciasTableBody .btn-anular-detalle:disabled {
+        background: #ccc !important;
+        cursor: not-allowed;
+        opacity: 0.6;
+        transform: none !important;
+    }
+
+    #detalleSecuenciasTableBody .btn-activar-detalle {
+        background: #052F62 !important;
+        color: white !important;
+    }
+
+    #detalleSecuenciasTableBody .btn-activar-detalle:hover:not(:disabled) {
+        background: #031B38 !important;
+        transform: translateY(-1px);
+    }
+
+    #detalleSecuenciasTableBody .btn-activar-detalle:disabled {
+        background: #ccc !important;
+        cursor: not-allowed;
+        opacity: 0.6;
+        transform: none !important;
+    }
+
+    /* Info del modal anular */
+    .info-anular {
+        background: #f8f9fa;
+        padding: 12px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        border-left: 3px solid #950404;
+    }
+
+    .info-anular p {
+        margin: 5px 0;
+        font-size: 12px;
+    }
+
+    .info-anular strong {
+        color: #555;
+    }
+
+    /* Badge de estado rechazado/anulado */
+    .status-rechazado {
+        background: #ffebee;
+        color: #950404;
+    }
+</style>
+
+{% csrf_token %}
+{% endblock %}

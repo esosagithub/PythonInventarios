@@ -1,0 +1,3664 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Menú Hamburguesa -->
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <!-- Overlay para menú móvil -->
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Indicador de Carga Global -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Cargando...</p>
+        </div>
+    </div>
+
+    <!-- Menú Lateral -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Contenido Principal -->
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Primer Conteo</h1>
+            <p>Gestión de primer conteo de inventarios y códigos de barras</p>
+        </div>
+
+        <!-- Lista de Conteos -->
+        <div id="conteosContainer" class="card">
+            <h2>Conteos de Inventario</h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Número del Conteo</th>
+                            <th>Estado</th>
+                            <th>Fecha Inicio</th>
+                            <th>Fecha Fin</th>
+                            <th>Responsable</th>
+                            <th>Planifica</th>
+                            <th>Centro</th>
+                            <th>Almacén</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="conteoTableBody">
+                        {% for conteo in conteos %}
+                        <tr>
+                            <td>{{ conteo.numero_conteo }}</td>
+                            <td>
+                                <span class="status-badge status-{{ conteo.estado|lower }}">
+                                    {{ conteo.estado }}
+                                </span>
+                            </td>
+                            <td>{{ conteo.fecha_inicio }}</td>
+                            <td>{{ conteo.fecha_fin }}</td>
+                            <td>{{ conteo.nm_responsable }}</td>
+                            <td>{{ conteo.usuario_creacion }}</td>
+                            <td>{{ conteo.centro }}</td>
+                            <td>{{ conteo.almacen }}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn-icon btn-stats" title="Ver estadísticas"
+                                        data-id="{{ conteo.id }}" onclick="mostrarEstadisticas(this.dataset.id)">
+                                        <i class="fas fa-chart-pie"></i>
+                                    </button>
+                                    {% if conteo.estado == 'PRIMER_CONTEO' or conteo.estado == 'SEGUNDO_CONTEO' or conteo.estado == 'ACTA_PRELIMINAR' %}
+                                    <button class="btn-icon btn-disabled" title="Detalle no disponible en este estado" disabled>
+                                        <i class="fas fa-file-lines"></i>
+                                    </button>
+                                    {% else %}
+                                    <button class="btn-icon" title="Ver detalle" data-id="{{ conteo.id }}"
+                                        onclick="cargarDetallePiqueo(this.dataset.id)">
+                                        <i class="fas fa-file-lines"></i>
+                                    </button>
+                                    {% endif %}
+
+                                    {% if conteo.estado == 'EN_PROCESO' %}
+                                    <button class="btn-icon btn-success" title="Cerrar Conteo" data-id="{{ conteo.id }}"
+                                        onclick="cerrarConteo(this.dataset.id)">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                    {% else %}
+                                    <button class="btn-icon btn-disabled"
+                                        title="Solo disponible para conteos EN_PROCESO" disabled>
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                    {% endif %}
+
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="9" style="text-align: center; padding: 20px;">
+                                No hay conteos de inventario registrados.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tabla de Detalle Piqueo (inicialmente oculta) -->
+        <div id="detalleContainer" class="card" style="display: none;">
+            <div class="card-header-with-close">
+                <div class="header-left-content">
+                    <h2>Detalle del Piqueo</h2>
+                    <!-- BOTÓN PIQUEO MANUAL MOVIDO AQUÍ -->
+                </div>
+                <button type="button" class="close" onclick="ocultarDetalle()">×</button>
+            </div>
+            <div>
+                <button type="button" class="btn btn-piqueo-manual" id="btnPiqueoManual"
+                    onclick="abrirPiqueoManualGeneral()" style="display: none;">
+                    <i class="fas fa-keyboard"></i> Piquear Manual
+                </button>
+            </div>
+            <!-- FILTROS POR UBICACIÓN Y CÓDIGO -->
+            <div class="filtros-detalle" style="margin:12px 0; display:flex; gap:8px; align-items:center;">
+                <select id="selectFiltroUbicacion" style="padding:6px; min-width:200px;">
+                    <option value="">Todas las ubicaciones</option>
+                </select>
+                <input type="text" id="inputFiltroCodigo" placeholder="Filtrar por código" style="padding:6px;">
+                <button type="button" class="btn" onclick="aplicarFiltrosDetalle()" style="padding:6px 10px; white-space:nowrap; min-width:80px; max-width:120px; text-align:center;">Buscar</button>
+                <button type="button" class="btn btn-close" onclick="limpiarFiltrosDetalle()" style="padding:6px 10px; white-space:nowrap; min-width:80px; max-width:120px;">Limpiar</button>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Grupo Artículos</th>
+                            <th>Observaciones</th>
+                            <th>Ubicación</th>
+                            <th>Secuencia</th>
+                            <th>Código</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detalleTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tabla de Códigos de Barras (inicialmente oculta) -->
+        <div id="barcodesContainer" class="card" style="display: none;">
+            <div class="card-header-with-close" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                <h2 style="margin:0;">Códigos de Barras Escaneados</h2>
+                <button type="button" class="close" onclick="ocultarBarcodes()">×</button>
+            </div>
+
+            <!-- Controles de filtro y acciones (debajo del título) -->
+            <div class="barcodes-controls" style="display:flex;align-items:center;gap:8px;padding:8px 12px;">
+                <input type="text" id="inputFiltroBarcode" placeholder="Filtrar por código" style="padding:6px; min-width:260px;">
+                <button type="button" class="btn" onclick="cargarBarcodesEscaneo(currentSectionCode)" title="Aplicar filtro" style="padding:6px 10px; min-width:80px; max-width:120px; height:32px; white-space:nowrap; flex:0 0 auto;">Aplicar</button>
+                <button type="button" class="btn btn-warning-all" onclick="reprocesarTodosEAN()" title="Actualizar todos los EAN con error" id="btnActualizarTodos">
+                    <i class="fas fa-rotate"></i> Actualizar Estado
+                </button>
+                <button type="button" class="btn btn-close" onclick="eliminarTodosBarcodes()" title="Eliminar todos los registros" id="btnEliminarTodos">
+                    <i class="fas fa-trash-alt"></i> Eliminar Todos
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Conteo</th>
+                            <th>Código Barras</th>
+                            <th>Código SAP</th>
+                            <th>Descripción</th>
+                            <th>Estado</th>
+                            <th>Cédula</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="barcodesTableBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Estadísticas Rápidas - SIEMPRE VISIBLES -->
+            <div class="stats-grid" id="barcodesStats">
+                <div class="stat-card">
+                    <h3 id="totalBarcodes">0</h3>
+                    <small>Total Códigos Escaneados</small>
+                </div>
+                <div class="stat-card stat-validado">
+                    <h3 id="totalValidados">0</h3>
+                    <small>EAN Validados</small>
+                </div>
+                <div class="stat-card stat-no-validado">
+                    <h3 id="totalNoValidados">0</h3>
+                    <small>EAN con Error</small>
+                </div>
+            </div>
+        </div>
+
+        <div id="estadisticasModal" class="modal" style="display: none;">
+            <div class="modal-content modal-estadisticas">
+                <div class="modal-header">
+                    <h2>Estadísticas del Conteo</h2>
+                    <button type="button" class="close" onclick="cerrarEstadisticas()">×</button>
+                </div>
+                <div class="modal-body">
+                    <!-- Información del Conteo -->
+                    <div class="info-conteo-estadisticas">
+                        <div class="info-row">
+                            <strong>Número de Conteo:</strong>
+                            <span id="stat_numero_conteo">-</span>
+                        </div>
+                        <div class="info-row">
+                            <strong>Estado:</strong>
+                            <span id="stat_estado_badge"></span>
+                        </div>
+                        <div class="info-row">
+                            <strong>Responsable:</strong>
+                            <span id="stat_responsable">-</span>
+                        </div>
+                        <div class="info-row">
+                            <strong>Centro:</strong>
+                            <span id="stat_centro">1</span>
+                        </div>
+                        <div class="info-row">
+                            <strong>Almacén:</strong>
+                            <span id="stat_almacen">-</span>
+                        </div>
+                        <div class="info-row">
+                            <strong>Fecha Inicio:</strong>
+                            <span id="stat_fecha_inicio">-</span>
+                        </div>
+         
+                    </div>
+
+                    <!-- Estadísticas en Cards -->
+                    <div class="stats-grid-modal">
+                        <div class="stat-card-modal stat-total">
+                            <h3 id="stat_total_ubicaciones">0</h3>
+                            <small>Total Ubicaciones</small>
+                        </div>
+                        <div class="stat-card-modal stat-cerradas">
+                            <h3 id="stat_ubicaciones_cerradas">0</h3>
+                            <small>Ubicaciones Cerradas</small>
+                        </div>
+                        <div class="stat-card-modal stat-pendientes">
+                            <h3 id="stat_ubicaciones_pendientes">0</h3>
+                            <small>Ubicaciones Pendientes</small>
+                        </div>
+                    </div>
+
+                    <!-- Barra de Progreso -->
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>Porcentaje de Avance</span>
+                            <span id="stat_porcentaje_texto" class="progress-percentage">0%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div id="stat_progress_bar" class="progress-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- NUEVA SECCIÓN: DETALLE DEL PIQUEO EN EL MODAL -->
+                    <div class="detalle-section-modal">
+                        <div class="detalle-header-modal">
+                            <h3>Detalle del Piqueo</h3>
+                        </div>
+                        <div class="table-container-modal">
+                            <table class="data-table tabla-detalle-modal">
+                                <thead>
+                                    <tr>
+                                        <th class="col-grupo">Grupo Artículos</th>
+                                        <th class="col-ubicacion">Ubicación</th>
+                                        <th class="col-secuencia">Secuencia</th>
+                                        <th class="col-codigo">Código</th>
+                                        <th class="col-estado">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="detalleTableBodyModal">
+                                    <tr>
+                                        <td colspan="5" class="text-center">Cargando detalles...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN: COLABORADORES Y ESCANEOS -->
+                    <div class="colaboradores-section">
+                        <div class="colaboradores-header">
+                            <h3>Colaboradores - Productos Escaneados</h3>
+                            <div class="total-escaneados-badge">
+                                <span>Total Escaneado:</span>
+                                <strong id="stat_total_productos">0</strong>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table tabla-colaboradores">
+                                <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Cédula</th>
+                                        <th>Nombres</th>
+                                        <th class="text-center">Cantidad Escaneada</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="colaboradoresTableBody">
+                                    <tr>
+                                        <td colspan="4" class="text-center">No hay datos disponibles</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-close" onclick="cerrarEstadisticas()">Cerrar</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- MODAL DE PIQUEO MANUAL -->
+<div id="modalPiqueoManual" class="modal">
+    <div class="modal-content modal-piqueo">
+        <div class="modal-header">
+            <h2>Piqueo Manual</h2>
+            <button class="close" onclick="cerrarPiqueoManual()">&times;</button>
+        </div>
+
+        <div class="modal-body">
+            <!-- Formulario de ingreso -->
+            <div class="form-piqueo">
+                <div class="form-row-piqueo">
+                    <div class="form-group-piqueo">
+                        <label for="inputCodigoBarras">Código de Barras:</label>
+                        <input type="text" id="inputCodigoBarras" class="form-control-piqueo"
+                            placeholder="Ingrese código de barras" autocomplete="off">
+                    </div>
+
+                    <div class="form-group-piqueo form-group-conteo">
+                        <label for="inputConteo">Conteo:</label>
+                        <input type="number" id="inputConteo" class="form-control-piqueo" placeholder="Cantidad" min="1"
+                            value="1">
+                    </div>
+
+                    <div class="form-group-piqueo form-group-agregar">
+                        <button type="button" class="btn btn-agregar-piqueo" onclick="agregarItemPiqueoManual()">
+                            <i class="fas fa-plus"></i> Agregar
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de items agregados -->
+            <div class="tabla-piqueo-container">
+                <h3>Items Agregados</h3>
+                <div class="table-responsive">
+                    <table class="data-table tabla-piqueo-manual">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Código de Barras</th>
+                                <th>Conteo</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaPiqueoManualBody">
+                            <tr>
+                                <td colspan="4" class="text-center">No hay items agregados</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Resumen -->
+            <div class="resumen-piqueo">
+                <p><strong>Total Items:</strong> <span id="totalItemsPiqueo">0</span></p>
+                <p><strong>Total Conteo:</strong> <span id="totalConteoPiqueo">0</span></p>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn-success-piqueo" onclick="guardarPiqueoManual()">
+                <i class="fas fa-save"></i> Guardar
+            </button>
+            <button type="button" class="btn btn-close" onclick="cerrarPiqueoManual()">
+                Cancelar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Incluir JavaScript del Dashboard -->
+<script src="{% static 'js/dashboard.js' %}"></script>
+<script>
+    // Variables globales
+    let currentFilters = {};
+    let currentSectionCode = '';
+    let currentConteoId = null;
+
+    // ========== FUNCIONES DE LOADING ==========
+    function showLoading(message = 'Cargando...') {
+        const overlay = document.getElementById('loadingOverlay');
+        const loadingText = overlay.querySelector('p');
+        loadingText.textContent = message;
+        overlay.style.display = 'flex';
+    }
+
+    function hideLoading() {
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.style.display = 'none';
+    }
+
+    // ========== FUNCIONES AUXILIARES ==========
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    function getCsrfToken() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
+
+    // ========== FUNCIONES ESPECÍFICAS DE PRIMER CONTEO ==========
+    function cargarDetallePiqueo(piqueoId) {
+        console.log('🔍 Cargando detalle para piqueo:', piqueoId);
+        currentConteoId = piqueoId;
+
+        showLoading('Cargando detalle del piqueo...');
+
+        // Leer filtros desde los inputs (si existen)
+        const filtroUbicacion = document.getElementById('selectFiltroUbicacion') ? document.getElementById('selectFiltroUbicacion').value.trim() : '';
+        const filtroCodigo = document.getElementById('inputFiltroCodigo') ? document.getElementById('inputFiltroCodigo').value.trim() : '';
+
+        fetch('/obtener-detalle-piqueo-primer-conteo/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ piqueo_id: piqueoId, ubicacion: filtroUbicacion, codigo: filtroCodigo })
+        })
+            .then(response => {
+                console.log('📡 Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                console.log('📦 Datos recibidos:', data);
+
+                if (data.success) {
+                    const tbody = document.getElementById('detalleTableBody');
+                    tbody.innerHTML = '';
+
+                    if (data.detalles.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="7" class="text-center">No hay detalles disponibles para este piqueo</td></tr>';
+                        // Ocultar botón si no hay detalles
+                        document.getElementById('btnPiqueoManual').style.display = 'none';
+                    } else {
+                        console.log(`✅ Se encontraron ${data.detalles.length} detalles`);
+
+                        // ⭐ MOSTRAR BOTÓN PIQUEO MANUAL EN LA PARTE SUPERIOR
+                        document.getElementById('btnPiqueoManual').style.display = 'flex';
+
+                        // Poblar dropdown de ubicaciones (únicas)
+                        try {
+                            const selectUb = document.getElementById('selectFiltroUbicacion');
+                            if (selectUb) {
+                                const opciones = new Set();
+                                data.detalles.forEach(d => {
+                                    if (d.ubicacion) opciones.add(d.ubicacion);
+                                });
+                                // Construir opciones
+                                let html = '<option value="">Todas las ubicaciones</option>';
+                                Array.from(opciones).sort().forEach(u => {
+                                    // Escape simple
+                                    const v = String(u).replace(/"/g, '&quot;');
+                                    html += `<option value="${v}">${u}</option>`;
+                                });
+                                selectUb.innerHTML = html;
+                            }
+                        } catch (e) {
+                            console.warn('No se pudo poblar dropdown de ubicaciones', e);
+                        }
+
+                        data.detalles.forEach(detalle => {
+                            const row = tbody.insertRow();
+
+                            const estadoValidacion = detalle.estado_validacion ? detalle.estado_validacion.toUpperCase() : 'ERROR';
+                            let estadoBadge = '';
+
+                            console.log(`🔍 Código: ${detalle.codigo}, Estado: ${estadoValidacion}`);
+
+                            if (estadoValidacion === 'VALIDADO') {
+                                estadoBadge = `<span class="status-badge status-completado">VALIDADO</span>`;
+                            } else {
+                                estadoBadge = `<span class="status-badge status-error-detalle">ERROR</span>`;
+                            }
+
+                            // ⭐ BOTÓN PIQUEO MANUAL ELIMINADO DE LA TABLA - SOLO QUEDA VER CÓDIGOS
+                            row.innerHTML = `
+                        <td><strong>${detalle.grupo_articulos}</strong></td>
+                        <td>${detalle.observaciones}</td>
+                        <td>${detalle.ubicacion}</td>
+                        <td>${detalle.secuencia || ''}</td>
+                        <td>${detalle.codigo}</td>
+                        <td>${estadoBadge}</td>
+                        <td>
+                            <div class="action-buttons">
+                                <button class="btn-icon" title="Ver Códigos" onclick="cargarBarcodesEscaneo('${detalle.codigo}')">
+                                    <i class="fas fa-chart-bar"></i>
+                                </button>
+                                <!-- Botón eliminar eliminado -->
+                            </div>
+                        </td>
+                    `;
+                        });
+                    }
+
+                    // NUEVO: Ocultar tabla de conteos y mostrar detalle
+                    document.getElementById('detalleContainer').style.display = 'block';
+                    document.getElementById('conteosContainer').style.display = 'none';
+                    document.getElementById('barcodesContainer').style.display = 'none';
+
+                    // Actualizar título con número de conteo
+                    const numeroConteo = obtenerNumeroConteoDesdeFila(piqueoId);
+                    const detalleHeader = document.querySelector('#detalleContainer h2');
+                    detalleHeader.innerHTML = `Detalle del Piqueo: <strong>${numeroConteo}</strong>`;
+
+                    document.getElementById('detalleContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else {
+                    alert('Error: ' + (data.error || 'Error desconocido'));
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('❌ Error completo:', error);
+                alert('Error al cargar el detalle del piqueo: ' + error.message);
+            });
+    }
+
+    function aplicarFiltrosDetalle() {
+        if (!currentConteoId) {
+            alert('Seleccione un conteo primero');
+            return;
+        }
+        cargarDetallePiqueo(currentConteoId);
+    }
+
+    function limpiarFiltrosDetalle() {
+        const u = document.getElementById('selectFiltroUbicacion');
+        const c = document.getElementById('inputFiltroCodigo');
+        if (u) u.value = '';
+        if (c) c.value = '';
+        if (currentConteoId) cargarDetallePiqueo(currentConteoId);
+    }
+    // Obtener número de conteo desde la fila de la tabla
+    function obtenerNumeroConteoDesdeFila(piqueoId) {
+        const filas = document.querySelectorAll('#conteoTableBody tr');
+        for (let fila of filas) {
+            const botonDetalle = fila.querySelector('button[onclick*="cargarDetallePiqueo(' + piqueoId + ')"]');
+            if (botonDetalle) {
+                const celdaNumeroConteo = fila.cells[0]; // Primera celda contiene el número de conteo
+                return celdaNumeroConteo.textContent.trim();
+            }
+        }
+        return 'N/A';
+    }
+
+    function cargarBarcodesEscaneo(sectionName = '464mostrador1') {
+        console.log('🔍 Cargando códigos de barras para sección:', sectionName);
+
+        currentSectionCode = sectionName;
+
+        showLoading('Cargando códigos de barras...');
+
+        // Leer filtro de código de barras si existe
+        const filtroCodigoBar = document.getElementById('inputFiltroBarcode') ? document.getElementById('inputFiltroBarcode').value.trim() : '';
+
+        fetch('/obtener-barcodes-escaneo-primer-conteo/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ section_name: sectionName, codigo_filter: filtroCodigoBar })
+        })
+            .then(response => {
+                console.log('📡 Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                console.log('📦 Barcodes recibidos:', data);
+
+                if (data.success) {
+                    const tbody = document.getElementById('barcodesTableBody');
+                    tbody.innerHTML = '';
+
+                    const barcodesHeader = document.querySelector('#barcodesContainer h2');
+                    barcodesHeader.innerHTML = `Códigos de Barras Escaneados - Sección: <strong>${currentSectionCode}</strong>`;
+
+                    // INICIALIZAR CONTADORES EN 0
+                    let totalConteo = 0;
+                    let totalValidados = 0;
+                    let totalNoValidados = 0;
+
+                    if (data.barcodes.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="7" class="text-center">
+                    No se encontraron códigos de barras para la sección: <strong>${currentSectionCode}</strong>
+                </td></tr>`;
+                    } else {
+                        console.log(`✅ Se encontraron ${data.barcodes.length} códigos de barras`);
+
+                        data.barcodes.forEach(barcode => {
+                            const row = tbody.insertRow();
+
+                            const conteo = parseInt(barcode.conteo) || 0;
+                            totalConteo += conteo;
+
+                            const estadoEAN = barcode.estado_EAN.toUpperCase();
+                            const badgeClass = estadoEAN === 'VALIDADO' ? 'status-validado' : 'status-no-validado';
+
+                            if (estadoEAN === 'VALIDADO') {
+                                totalValidados += conteo;
+                            } else {
+                                totalNoValidados += conteo;
+                            }
+
+                            let botonesHTML = '';
+
+                            if (estadoEAN !== 'VALIDADO') {
+                                botonesHTML = `
+                            <div class="action-buttons">
+                                <button class="btn-icon btn-warning" title="Reprocesar EAN" onclick="reprocesarEAN('${barcode.codigo_barras}')">
+                                    <i class="fas fa-rotate"></i>
+                                </button>
+                                <button class="btn-icon btn-danger" title="Eliminar" onclick="eliminarBarcode('${barcode.codigo_barras}')">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        `;
+                            } else {
+                                botonesHTML = `
+                            <div class="action-buttons">
+                                <button class="btn-icon btn-danger" title="Eliminar" onclick="eliminarBarcode('${barcode.codigo_barras}')">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        `;
+                            }
+
+                            row.innerHTML = `
+                        <td>${barcode.conteo}</td>
+                        <td>${barcode.codigo_barras}</td>
+                        <td>${barcode.codigo_sap}</td>
+                        <td>${barcode.descripcion}</td>
+                        <td>
+                            <span class="status-badge ${badgeClass}">
+                                ${barcode.estado_EAN}
+                            </span>
+                        </td>
+                        <td>${barcode.cedula}</td>
+                        <td>
+                            ${botonesHTML}
+                        </td>
+                    `;
+                        });
+
+                        console.log(`📊 Total de conteo: ${totalConteo}`);
+                        console.log(`✅ Total validados: ${totalValidados}`);
+                        console.log(`❌ Total no validados: ${totalNoValidados}`);
+                    }
+
+                    // ACTUALIZAR ESTADÍSTICAS - SIEMPRE SE MUESTRAN, INCLUSO CON 0
+                    document.getElementById('totalBarcodes').textContent = totalConteo;
+                    document.getElementById('totalValidados').textContent = totalValidados;
+                    document.getElementById('totalNoValidados').textContent = totalNoValidados;
+
+                    // ACTUALIZAR ESTADO DEL BOTÓN ELIMINAR TODOS
+                    setTimeout(() => {
+                        actualizarEstadoBotonEliminarTodos();
+                    }, 100);
+
+                    // NUEVO: Ocultar detalle y mostrar códigos de barras
+                    document.getElementById('barcodesContainer').style.display = 'block';
+                    document.getElementById('detalleContainer').style.display = 'none'; // Ocultar detalle
+                    document.getElementById('conteosContainer').style.display = 'none';
+
+                    document.getElementById('barcodesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else {
+                    alert('Error: ' + (data.error || 'Error desconocido'));
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('❌ Error completo:', error);
+                alert('Error al cargar los códigos de barras: ' + error.message);
+            });
+    }
+
+    // FUNCIÓN PARA ELIMINAR TODOS LOS CÓDIGOS DE BARRAS
+    function eliminarTodosBarcodes() {
+        if (!currentSectionCode) {
+            alert('❌ No hay sección seleccionada para eliminar registros.');
+            return;
+        }
+
+        const totalRegistros = document.querySelectorAll('#barcodesTableBody tr').length;
+
+        if (totalRegistros === 0) {
+            alert('ℹ️ No hay registros para eliminar.');
+            return;
+        }
+
+        if (!confirm(`⚠️ ¿ESTÁ SEGURO DE QUE DESEA ELIMINAR TODOS LOS REGISTROS?\n\nSe eliminarán ${totalRegistros} registros de la sección: ${currentSectionCode}\n\nEsta acción NO se puede deshacer.`)) {
+            return;
+        }
+
+        console.log('🗑️ Eliminando todos los barcodes para sección:', currentSectionCode);
+
+        showLoading('Eliminando todos los registros...');
+
+        fetch('/eliminar-todos-barcodes-primer-conteo/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                section_name: currentSectionCode
+            })
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                console.log('✅ Respuesta eliminación masiva:', data);
+
+                if (data.success) {
+                    // Actualizar estado del detalle en UI si es necesario
+                    if (data.nuevo_estado_validacion && data.section_name) {
+                        actualizarEstadoDetalleEnUI(data.section_name, data.nuevo_estado_validacion);
+                    }
+
+                    alert(`✅ ${data.message}\n\nRegistros eliminados: ${data.registros_eliminados}`);
+
+                    // Recargar la tabla (debería estar vacía)
+                    cargarBarcodesEscaneo(currentSectionCode);
+                } else {
+                    alert('❌ Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('❌ Error al eliminar todos los registros:', error);
+                alert('Error al eliminar todos los registros: ' + error.message);
+            });
+    }
+
+    // FUNCIÓN PARA VERIFICAR SI HAY REGISTROS Y ACTUALIZAR ESTADO DEL BOTÓN
+    function actualizarEstadoBotonEliminarTodos() {
+        const btnEliminarTodos = document.getElementById('btnEliminarTodos');
+        const totalRegistros = document.querySelectorAll('#barcodesTableBody tr').length;
+
+        if (btnEliminarTodos) {
+            if (totalRegistros === 0) {
+                btnEliminarTodos.disabled = true;
+                btnEliminarTodos.style.opacity = '0.6';
+                btnEliminarTodos.style.cursor = 'not-allowed';
+                btnEliminarTodos.title = 'No hay registros para eliminar';
+            } else {
+                btnEliminarTodos.disabled = false;
+                btnEliminarTodos.style.opacity = '1';
+                btnEliminarTodos.style.cursor = 'pointer';
+                btnEliminarTodos.title = `Eliminar todos los registros (${totalRegistros})`;
+            }
+        }
+    }
+
+    function eliminarBarcode(codigoBarras) {
+        if (confirm(`¿Está seguro de que desea eliminar el código de barras: ${codigoBarras}?`)) {
+            showLoading('Eliminando código de barras...');
+
+            fetch('/eliminar-barcode-primer-conteo/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    codigo_barras: codigoBarras,
+                    section_name: currentSectionCode
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    hideLoading();
+                    if (data.success) {
+                        console.log('✅ Código eliminado:', data);
+
+                        if (data.nuevo_estado_validacion && data.section_name) {
+                            console.log(`🔄 Actualizando estado de validación: ${data.nuevo_estado_validacion}`);
+                            actualizarEstadoDetalleEnUI(data.section_name, data.nuevo_estado_validacion);
+                        }
+
+                        alert(data.message);
+
+                        // Recargar la tabla de códigos de barras
+                        cargarBarcodesEscaneo(currentSectionCode);
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    console.error('Error:', error);
+                    alert('Error al eliminar el código de barras: ' + error.message);
+                });
+        }
+    }
+
+    // Eliminar una TOMA (detalle de piqueo)
+    function eliminarToma(detalleId) {
+        if (!detalleId) {
+            alert('ID de detalle inválido');
+            return;
+        }
+
+        if (!confirm(`¿Está seguro de que desea eliminar la toma (ID: ${detalleId})? Esta acción eliminará la toma de la base de datos.`)) {
+            return;
+        }
+
+        showLoading('Eliminando toma...');
+
+        fetch('/eliminar-toma-primer-conteo/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                detalle_id: detalleId,
+                piqueo_id: currentConteoId
+            })
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                if (data.success) {
+                    alert(data.message || 'Toma eliminada correctamente');
+                    // Recargar detalle del conteo actual
+                    if (currentConteoId) {
+                        cargarDetallePiqueo(currentConteoId);
+                    } else {
+                        // Si no hay conteo seleccionado, recargar la lista principal
+                        location.reload();
+                    }
+                } else {
+                    alert('Error: ' + (data.message || 'No se pudo eliminar la toma'));
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('Error al eliminar toma:', error);
+                alert('Error al eliminar la toma: ' + error.message);
+            });
+    }
+
+    // Actualizar el estado de validación en la UI sin recargar toda la tabla
+    function actualizarEstadoDetalleEnUI(codigo, nuevoEstado) {
+        console.log(`🔄 Actualizando UI para código: ${codigo}, nuevo estado: ${nuevoEstado}`);
+
+        // Buscar la fila del detalle que corresponde al código
+        const detalleTable = document.getElementById('detalleTableBody');
+        if (!detalleTable) {
+            console.log('⚠️ Tabla de detalles no visible');
+            return;
+        }
+
+        const rows = detalleTable.getElementsByTagName('tr');
+
+        for (let row of rows) {
+            const cells = row.getElementsByTagName('td');
+
+            // Índices actuales: CÓDIGO=4, ESTADO=5
+            if (cells.length > 5 && cells[4].textContent.trim() === codigo) {
+                const estadoCell = cells[5];
+
+                // Actualizar el badge de estado
+                const estadoNormalizado = nuevoEstado.toUpperCase();
+                let estadoBadgeHTML = '';
+
+                if (estadoNormalizado === 'VALIDADO') {
+                    estadoBadgeHTML = '<span class="status-badge status-completado">VALIDADO</span>';
+                } else {
+                    estadoBadgeHTML = '<span class="status-badge status-error-detalle">ERROR</span>';
+                }
+
+                estadoCell.innerHTML = estadoBadgeHTML;
+
+                // Efecto visual de actualización
+                row.style.backgroundColor = '#ffffcc';
+                setTimeout(() => {
+                    row.style.backgroundColor = '';
+                }, 1000);
+
+                console.log(`✅ Estado actualizado en UI para código: ${codigo}`);
+                break;
+            }
+        }
+    }
+
+    function reprocesarEAN(codigoBarras) {
+        if (confirm(`¿Está seguro de que desea reprocesar el código de barras: ${codigoBarras}?`)) {
+            showLoading('Reprocesando EAN...');
+
+            fetch('/reprocesar-ean-primer-conteo/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    codigo_barras: codigoBarras,
+                    section_name: currentSectionCode,
+                    piqueo_id: currentConteoId
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    hideLoading();
+                    if (data.success) {
+                        console.log('✅ EAN reprocesado:', data);
+
+                        if (data.nuevo_estado_validacion && data.section_name) {
+                            actualizarEstadoDetalleEnUI(data.section_name, data.nuevo_estado_validacion);
+                        }
+
+                        alert(data.message);
+                        cargarBarcodesEscaneo(currentSectionCode);
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    hideLoading();
+                    console.error('Error:', error);
+                    alert('Error al reprocesar el código de barras: ' + error.message);
+                });
+        }
+    }
+
+    // FUNCIÓN: Reprocesar/Actualizar TODOS los EAN con error de forma masiva
+    async function reprocesarTodosEAN() {
+        // Recolectar todos los códigos de barras con error (los que tienen el botón btn-warning)
+        const filas = document.querySelectorAll('#barcodesTableBody tr');
+        const codigosConError = [];
+
+        filas.forEach(fila => {
+            // Identificar filas con botón de reprocesar (btn-warning = tiene error)
+            const btnReprocesar = fila.querySelector('.btn-warning');
+            if (btnReprocesar) {
+                // Extraer el código de barras del onclick del botón
+                const onclickAttr = btnReprocesar.getAttribute('onclick');
+                const match = onclickAttr && onclickAttr.match(/reprocesarEAN\('([^']+)'\)/);
+                if (match && match[1]) {
+                    codigosConError.push(match[1]);
+                }
+            }
+        });
+
+        if (codigosConError.length === 0) {
+            alert('ℹ️ No hay EAN con error para actualizar. Todos los códigos están VALIDADOS.');
+            return;
+        }
+
+        if (!confirm(`🔄 ¿ESTÁ SEGURO DE QUE DESEA ACTUALIZAR TODOS LOS EAN CON ERROR?\n\nSe reprocesarán ${codigosConError.length} código(s) con error en la sección: ${currentSectionCode}\n\nEsta operación puede tardar unos segundos.`)) {
+            return;
+        }
+
+        console.log(`🔄 Iniciando reprocesamiento masivo de ${codigosConError.length} EAN...`);
+        showLoading(`Actualizando EAN con error... (0 de ${codigosConError.length})`);
+
+        let exitosos = 0;
+        let fallidos = 0;
+
+        for (let i = 0; i < codigosConError.length; i++) {
+            const codigoBarras = codigosConError[i];
+
+            // Actualizar mensaje de progreso
+            const overlay = document.getElementById('loadingOverlay');
+            const loadingText = overlay.querySelector('p');
+            if (loadingText) {
+                loadingText.textContent = `Actualizando EAN con error... (${i + 1} de ${codigosConError.length})`;
+            }
+
+            try {
+                const response = await fetch('/reprocesar-ean-primer-conteo/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        codigo_barras: codigoBarras,
+                        section_name: currentSectionCode,
+                        piqueo_id: currentConteoId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.success) {
+                    exitosos++;
+                    console.log(`✅ EAN actualizado (${i + 1}/${codigosConError.length}): ${codigoBarras}`);
+                } else {
+                    fallidos++;
+                    console.warn(`⚠️ Error al actualizar EAN: ${codigoBarras} - ${data.message}`);
+                }
+            } catch (error) {
+                fallidos++;
+                console.error(`❌ Error al reprocesar ${codigoBarras}:`, error);
+            }
+        }
+
+        hideLoading();
+
+        let mensaje = `✅ Actualización masiva completada.\n\n`;
+        mensaje += `📊 Resumen:\n`;
+        mensaje += `  • Procesados: ${codigosConError.length}\n`;
+        mensaje += `  • Exitosos: ${exitosos}\n`;
+        if (fallidos > 0) {
+            mensaje += `  • Con errores: ${fallidos}\n`;
+        }
+
+        alert(mensaje);
+
+        // Recargar la tabla para reflejar los cambios
+        cargarBarcodesEscaneo(currentSectionCode);
+    }
+
+    // FUNCIÓN MODIFICADA: Ocultar detalle y mostrar conteos
+    function ocultarDetalle() {
+        document.getElementById('detalleContainer').style.display = 'none';
+        document.getElementById('conteosContainer').style.display = 'block';
+
+        // ⭐ OCULTAR BOTÓN PIQUEO MANUAL
+        document.getElementById('btnPiqueoManual').style.display = 'none';
+
+        // Restaurar título original
+        const detalleHeader = document.querySelector('#detalleContainer h2');
+        detalleHeader.innerHTML = 'Detalle del Piqueo';
+        currentConteoId = null;
+    }
+    // FUNCIÓN MODIFICADA: Ocultar barcodes y mostrar detalle
+    function ocultarBarcodes() {
+        const barcodesHeader = document.querySelector('#barcodesContainer h2');
+        barcodesHeader.innerHTML = 'Códigos de Barras Escaneados';
+        currentSectionCode = '';
+
+        // Reconsultar detalle para reflejar estados actualizados al volver.
+        if (currentConteoId) {
+            cargarDetallePiqueo(currentConteoId);
+        } else {
+            document.getElementById('barcodesContainer').style.display = 'none';
+            document.getElementById('detalleContainer').style.display = 'block';
+        }
+    }
+
+    // Mostrar estadísticas con detalle incluido
+    function mostrarEstadisticas(piqueoId) {
+        console.log('📊 Mostrando estadísticas para piqueo:', piqueoId);
+
+        showLoading('Cargando estadísticas...');
+
+        fetch('/obtener-estadisticas-conteo/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ piqueo_id: piqueoId })
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                hideLoading();
+                console.log('📊 Estadísticas recibidas:', data);
+
+                if (data.success) {
+                    const stats = data.estadisticas;
+
+                    const setText = (id, value) => {
+                        const element = document.getElementById(id);
+                        if (element) {
+                            element.textContent = value;
+                        }
+                    };
+
+                    const setHtml = (id, value) => {
+                        const element = document.getElementById(id);
+                        if (element) {
+                            element.innerHTML = value;
+                        }
+                    };
+
+                    // Actualizar información básica
+                    setText('stat_numero_conteo', stats.numero_conteo);
+                    setText('stat_responsable', stats.nm_responsable);
+                    setText('stat_centro', stats.centro);
+                    setText('stat_almacen', stats.almacen);
+                    setText('stat_fecha_inicio', stats.fecha_inicio || '-');
+                    setText('stat_fecha_fin', stats.fecha_fin || '-');
+
+                    const estadoBadge = document.getElementById('stat_estado_badge');
+                    if (estadoBadge) {
+                        estadoBadge.className = `status-badge status-${stats.estado.toLowerCase()}`;
+                        estadoBadge.textContent = stats.estado;
+                    }
+
+                    // Actualizar estadísticas de ubicaciones
+                    setText('stat_total_ubicaciones', stats.total_ubicaciones);
+                    setText('stat_ubicaciones_cerradas', stats.total_ubicaciones_cerradas);
+                    setText('stat_ubicaciones_pendientes', stats.total_ubicaciones_pendientes);
+
+                    // Actualizar barra de progreso
+                    const porcentaje = stats.porcentaje_avance;
+                    setText('stat_porcentaje_texto', `${porcentaje}%`);
+                    const progressBar = document.getElementById('stat_progress_bar');
+                    progressBar.style.width = `${porcentaje}%`;
+
+                    // Color de la barra según el porcentaje
+                    if (porcentaje < 30) {
+                        progressBar.style.backgroundColor = '#dc3545';
+                    } else if (porcentaje < 70) {
+                        progressBar.style.backgroundColor = '#ffc107';
+                    } else {
+                        progressBar.style.backgroundColor = '#28a745';
+                    }
+
+                    console.log(`📊 Porcentaje de avance: ${porcentaje}%`);
+
+                    // Cargar detalles en el modal
+                    cargarDetalleEnModal(piqueoId);
+
+                    // Actualizar colaboradores
+                    const tbody = document.getElementById('colaboradoresTableBody');
+                    if (!tbody) {
+                        console.error('No se encontro #colaboradoresTableBody en el DOM');
+                        document.getElementById('estadisticasModal').style.display = 'block';
+                        document.body.style.overflow = 'hidden';
+                        return;
+                    }
+                    tbody.innerHTML = '';
+
+                    if (data.colaboradores && data.colaboradores.length > 0) {
+                        console.log(`👥 Colaboradores: ${data.colaboradores.length}`);
+
+                        data.colaboradores.forEach((col, index) => {
+                            const row = tbody.insertRow();
+                            row.innerHTML = `
+                        <td class="text-center">${index + 1}</td>
+                        <td>${col.cedula}</td>
+                        <td><strong>${col.nombres}</strong></td>
+                        <td class="text-center">
+                            <span class="cantidad-badge">${col.cantidad_total.toLocaleString()}</span>
+                        </td>
+                    `;
+                        });
+
+                        const totalEscaneado = data.total_escaneado ?? data.total_productos_escaneados ?? 0;
+                        setText('stat_total_productos', Number(totalEscaneado).toLocaleString());
+
+                    } else {
+                        setHtml('colaboradoresTableBody', '<tr><td colspan="4" class="text-center">No hay colaboradores asignados</td></tr>');
+                        setText('stat_total_productos', '0');
+                    }
+
+                    // Mostrar el modal
+                    document.getElementById('estadisticasModal').style.display = 'block';
+                    document.body.style.overflow = 'hidden';
+                } else {
+                    alert('Error: ' + (data.error || 'Error desconocido'));
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('❌ Error completo:', error);
+                alert('Error al cargar las estadísticas: ' + error.message);
+            });
+    }
+
+    // ========== FUNCIÓN PARA ABRIR PIQUEO MANUAL GENERAL (CON CONSULTA PREVIA) ==========
+    async function abrirPiqueoManualGeneral() {
+        if (!currentConteoId) {
+            alert('⚠️ No hay un conteo seleccionado');
+            return;
+        }
+
+        console.log(`📝 Preparando piqueo manual para conteo ID: ${currentConteoId}`);
+
+        // ⭐ PASO 1: OBTENER DATOS DE TIENDA (sbs_no, store_no)
+        showLoading('Obteniendo datos de tienda...');
+
+        try {
+            const response = await fetch('/obtener-datos-tienda-piqueo-manual/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            });
+
+            const data = await response.json();
+
+            hideLoading();
+
+            if (!data.success) {
+                alert('❌ ' + data.message);
+                return;
+            }
+
+            // ⭐ GUARDAR DATOS DE TIENDA EN VARIABLE GLOBAL
+            datosTiendaPiqueo = {
+                sbs_no: data.sbs_no,
+                store_no: data.store_no,
+                cedula: data.cedula
+            };
+
+            console.log('✅ Datos de tienda obtenidos:', datosTiendaPiqueo);
+            console.log(`   - SBS_NO: ${datosTiendaPiqueo.sbs_no}`);
+            console.log(`   - STORE_NO: ${datosTiendaPiqueo.store_no}`);
+            console.log(`   - CÉDULA: ${datosTiendaPiqueo.cedula}`);
+
+            // ⭐ PASO 2: ABRIR EL MODAL
+            // Guardar información actual (sin código ni detalle específico)
+            currentCodigoSeccion = 'GENERAL';
+            currentDetallePiqueoId = null;
+
+            // Limpiar datos anteriores
+            itemsPiqueoManual = [];
+
+            // Limpiar campos de entrada
+            document.getElementById('inputCodigoBarras').value = '';
+            document.getElementById('inputConteo').value = '1';
+
+            // ⭐ MOSTRAR DATOS DE TIENDA EN EL MODAL
+            const infoPiqueo = document.querySelector('.info-piqueo');
+            if (infoPiqueo) {
+                // Agregar los datos de tienda al modal
+                const existingSbsInfo = infoPiqueo.querySelector('#piqueoSbsNo');
+                if (!existingSbsInfo) {
+                    infoPiqueo.innerHTML += `
+                    <p><strong>SBS_NO:</strong> <span id="piqueoSbsNo">${datosTiendaPiqueo.sbs_no || '-'}</span></p>
+                    <p><strong>STORE_NO:</strong> <span id="piqueoStoreNo">${datosTiendaPiqueo.store_no || '-'}</span></p>
+                `;
+                } else {
+                    document.getElementById('piqueoSbsNo').textContent = datosTiendaPiqueo.sbs_no || '-';
+                    document.getElementById('piqueoStoreNo').textContent = datosTiendaPiqueo.store_no || '-';
+                }
+            }
+
+            // Actualizar tabla y resumen
+            actualizarTablaPiqueoManual();
+            actualizarResumenPiqueo();
+
+            // Mostrar el modal
+            document.getElementById('modalPiqueoManual').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+
+            // Focus en el campo de código de barras
+            setTimeout(() => {
+                document.getElementById('inputCodigoBarras').focus();
+            }, 100);
+
+        } catch (error) {
+            hideLoading();
+            console.error('❌ Error al obtener datos de tienda:', error);
+            alert('Error al obtener datos de tienda: ' + error.message);
+        }
+    }
+
+    // NUEVA FUNCIÓN: Cargar detalle en el modal de estadísticas
+    function cargarDetalleEnModal(piqueoId) {
+        console.log('📋 Cargando detalle en modal para piqueo:', piqueoId);
+
+        fetch('/obtener-detalle-piqueo-primer-conteo/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ piqueo_id: piqueoId })
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('📦 Detalles recibidos para modal:', data);
+
+                if (data.success) {
+                    const tbody = document.getElementById('detalleTableBodyModal');
+                    tbody.innerHTML = '';
+
+                    if (data.detalles.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" class="text-center">No hay detalles disponibles para este piqueo</td></tr>';
+                    } else {
+                        console.log(`✅ Se encontraron ${data.detalles.length} detalles para el modal`);
+                        data.detalles.forEach(detalle => {
+                            const row = tbody.insertRow();
+
+                            const estadoValidacion = detalle.estado_validacion ? detalle.estado_validacion.toUpperCase() : 'ERROR';
+                            let estadoBadge = '';
+
+                            if (estadoValidacion === 'VALIDADO') {
+                                estadoBadge = `<span class="status-badge status-completado">VALIDADO</span>`;
+                            } else {
+                                estadoBadge = `<span class="status-badge status-error-detalle">ERROR</span>`;
+                            }
+
+                            // MODIFICADO: Solo mostrar datos, sin botones de acción
+                            row.innerHTML = `
+                        <td class="col-grupo">${detalle.grupo_articulos || ''}</td>
+                        <td class="col-ubicacion">${detalle.ubicacion || ''}</td>
+                        <td class="col-secuencia">${detalle.secuencia || ''}</td>
+                        <td class="col-codigo">${detalle.codigo || ''}</td>
+                        <td class="col-estado">${estadoBadge}</td>
+                    `;
+                        });
+                    }
+                } else {
+                    console.error('❌ Error al cargar detalles en modal:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error completo al cargar detalles en modal:', error);
+            });
+    }
+
+    function cerrarEstadisticas() {
+        document.getElementById('estadisticasModal').style.display = 'none';
+        document.body.style.overflow = 'auto';
+    }
+
+    // NUEVA FUNCIÓN PARA CERRAR CONTEO
+    function cerrarConteo(piqueoId) {
+        // 1. VALIDACIÓN PREVIA: Verificar que todos los items estén VALIDADOS
+        console.log('🔍 Verificando estado de items para conteo:', piqueoId);
+        showLoading('Verificando estado del conteo...');
+
+        fetch('/obtener-detalle-piqueo-primer-conteo/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({ piqueo_id: piqueoId })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (!data.success) {
+                    throw new Error(data.error || 'Error al obtener detalles');
+                }
+
+                // Verificar si hay items pendientes o con error
+                const itemsNoValidados = data.detalles.filter(d => d.estado_validacion !== 'VALIDADO');
+
+                hideLoading();
+
+                if (itemsNoValidados.length > 0) {
+                    // MOSTRAR MENSAJE DE ERROR Y DETENER
+                    alert(`⚠️ NO SE PUEDE CERRAR EL CONTEO\n\nSe encontraron ${itemsNoValidados.length} items sin validar o con errores.\n\nPor favor, revise el detalle y asegúrese de que todos los estados estén en 'VALIDADO'.`);
+
+                    // Opcional: Abrir automáticamente el detalle para que el usuario corrigiera
+                    cargarDetallePiqueo(piqueoId);
+                    return;
+                }
+
+                // SI TODO ESTÁ VALIDADO, PROCEDER CON CONFIRMACIÓN
+                if (!confirm('¿Está seguro de que desea cerrar este conteo?\n\nTodos los items están VALIDADOS.\nEsta acción procesará el primer conteo de inventario.')) {
+                    return;
+                }
+
+                console.log('🔒 Cerrando conteo:', piqueoId);
+                showLoading('Procesando cierre de conteo...');
+
+                // LLAMADA ORIGINAL PARA CERRAR
+                return fetch('/cerrar-conteo-primer-conteo/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        piqueo_id: piqueoId
+                    })
+                });
+            })
+            .then(response => {
+                if (!response) return; // Si se detuvo en validación o confirmación
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data) return; // Si se detuvo antes
+
+                hideLoading();
+                console.log('✅ Respuesta del servidor:', data);
+
+                if (data.success) {
+                    // ✅ ÉXITO
+                    alert('✅ ' + data.message);
+                    window.location.reload();
+                } else {
+                    // ❌ ERROR
+                    if (data.conteos_erroneos && data.conteos_erroneos > 0) {
+                        alert(data.message);
+                    } else {
+                        alert('❌ ' + data.message);
+                    }
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('❌ Error al cerrar conteo:', error);
+                alert('Error al cerrar el conteo: ' + error.message);
+            });
+    }
+
+    // ========== EVENT LISTENERS UNIFICADOS ==========
+    window.onclick = function (event) {
+        const estadisticasModal = document.getElementById('estadisticasModal');
+        if (event.target === estadisticasModal) {
+            cerrarEstadisticas();
+        }
+    }
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            cerrarEstadisticas();
+            ocultarDetalle();
+            ocultarBarcodes();
+        }
+    });
+    // ========== VARIABLES GLOBALES PARA PIQUEO MANUAL ==========
+    let itemsPiqueoManual = [];
+    let currentCodigoSeccion = '';
+    let currentDetallePiqueoId = null;
+    let datosTiendaPiqueo = {
+        sbs_no: null,
+        store_no: null,
+        cedula: null
+    };
+
+    // ========== FUNCIÓN PARA ABRIR PIQUEO MANUAL ==========
+    function abrirPiqueoManual(codigo, detallePiqueoId) {
+        console.log(`📝 Abriendo piqueo manual para código: ${codigo}, detalle: ${detallePiqueoId}`);
+
+        // Guardar información actual
+        currentCodigoSeccion = codigo;
+        currentDetallePiqueoId = detallePiqueoId;
+
+        // Limpiar datos anteriores
+        itemsPiqueoManual = [];
+
+        // Limpiar campos de entrada
+        document.getElementById('inputCodigoBarras').value = '';
+        document.getElementById('inputConteo').value = '1';
+
+        // Actualizar tabla y resumen
+        actualizarTablaPiqueoManual();
+        actualizarResumenPiqueo();
+
+        // Mostrar el modal
+        document.getElementById('modalPiqueoManual').style.display = 'block';
+        document.body.style.overflow = 'hidden';
+
+        // Focus en el campo de código de barras
+        setTimeout(() => {
+            document.getElementById('inputCodigoBarras').focus();
+        }, 100);
+    }
+
+    function cerrarPiqueoManual(forzarCierre = false) {
+        // Confirmar si hay items sin guardar
+        if (!forzarCierre && itemsPiqueoManual.length > 0) {
+            if (!confirm('Hay items sin guardar. ¿Está seguro de que desea cerrar?')) {
+                return;
+            }
+        }
+
+        document.getElementById('modalPiqueoManual').style.display = 'none';
+        document.body.style.overflow = 'auto';
+
+        // Limpiar datos
+        itemsPiqueoManual = [];
+        currentCodigoSeccion = '';
+        currentDetallePiqueoId = null;
+    }
+
+    // ========== FUNCIÓN PARA AGREGAR ITEM CON VALIDACIÓN ==========
+    async function agregarItemPiqueoManual() {
+        const codigoBarras = document.getElementById('inputCodigoBarras').value.trim();
+        const conteo = parseInt(document.getElementById('inputConteo').value);
+
+        // Validaciones básicas
+        if (!codigoBarras) {
+            alert('⚠️ Por favor, ingrese un código de barras');
+            document.getElementById('inputCodigoBarras').focus();
+            return;
+        }
+
+        if (!conteo || conteo < 1) {
+            alert('⚠️ El conteo debe ser mayor a 0');
+            document.getElementById('inputConteo').focus();
+            return;
+        }
+
+        // Validar que tengamos los datos de tienda
+        if (!datosTiendaPiqueo.sbs_no || !datosTiendaPiqueo.store_no) {
+            alert('❌ Error: No se tienen los datos de tienda (SBS_NO y STORE_NO)');
+            return;
+        }
+
+        console.log(`🔍 Validando código de barras: ${codigoBarras}`);
+        console.log(`   - SBS_NO: ${datosTiendaPiqueo.sbs_no}`);
+        console.log(`   - STORE_NO: ${datosTiendaPiqueo.store_no}`);
+
+        // Mostrar loading
+        showLoading('Validando código de barras...');
+
+        try {
+            // ⭐ LLAMAR AL BACKEND PARA VALIDAR EL CÓDIGO DE BARRAS
+            const response = await fetch('/validar-codigo-barras-piqueo-manual/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    codigo_barras: codigoBarras,
+                    sbs_no: datosTiendaPiqueo.sbs_no,
+                    store_no: datosTiendaPiqueo.store_no
+                })
+            });
+
+            const data = await response.json();
+
+            hideLoading();
+
+            if (!data.success) {
+                alert('❌ Error al validar: ' + data.message);
+                document.getElementById('inputCodigoBarras').focus();
+                return;
+            }
+
+            // ⭐ VERIFICAR SI EL CÓDIGO ES VÁLIDO
+            if (!data.valido) {
+                alert(`❌ ${data.message}\n\nCódigo de barras: ${codigoBarras}\nSBS_NO: ${datosTiendaPiqueo.sbs_no}\nSTORE_NO: ${datosTiendaPiqueo.store_no}`);
+
+                // Limpiar el campo de código de barras para que el usuario ingrese otro
+                document.getElementById('inputCodigoBarras').value = '';
+                document.getElementById('inputCodigoBarras').focus();
+                return;
+            }
+
+            // ✅ CÓDIGO VÁLIDO - PROCEDER A AGREGAR
+            console.log(`✅ Código de barras válido (count: ${data.count})`);
+
+            // Verificar si el código de barras ya existe en la lista
+            const existente = itemsPiqueoManual.find(item => item.codigoBarras === codigoBarras);
+
+            if (existente) {
+                if (confirm(`El código ${codigoBarras} ya existe en la lista.\n¿Desea sumar el conteo?`)) {
+                    existente.conteo += conteo;
+                    console.log(`✅ Conteo actualizado para ${codigoBarras}: ${existente.conteo}`);
+                } else {
+                    document.getElementById('inputCodigoBarras').value = '';
+                    document.getElementById('inputCodigoBarras').focus();
+                    return;
+                }
+            } else {
+                // Agregar nuevo item
+                itemsPiqueoManual.push({
+                    codigoBarras: codigoBarras,
+                    conteo: conteo
+                });
+                console.log(`✅ Item agregado: ${codigoBarras} - Conteo: ${conteo}`);
+            }
+
+            // Limpiar campos
+            document.getElementById('inputCodigoBarras').value = '';
+            document.getElementById('inputConteo').value = '1';
+
+            // Actualizar tabla y resumen
+            actualizarTablaPiqueoManual();
+            actualizarResumenPiqueo();
+
+            // Focus en código de barras para continuar agregando
+            document.getElementById('inputCodigoBarras').focus();
+
+        } catch (error) {
+            hideLoading();
+            console.error('❌ Error al validar código de barras:', error);
+            alert('Error al validar el código de barras: ' + error.message);
+            document.getElementById('inputCodigoBarras').focus();
+        }
+    }
+
+    // ========== FUNCIÓN PARA ACTUALIZAR TABLA ==========
+    function actualizarTablaPiqueoManual() {
+        const tbody = document.getElementById('tablaPiqueoManualBody');
+        tbody.innerHTML = '';
+
+        if (itemsPiqueoManual.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center">No hay items agregados</td></tr>';
+            return;
+        }
+
+        itemsPiqueoManual.forEach((item, index) => {
+            const row = tbody.insertRow();
+            row.innerHTML = `
+            <td class="text-center">${index + 1}</td>
+            <td><strong>${item.codigoBarras}</strong></td>
+            <td class="text-center">${item.conteo}</td>
+            <td class="text-center">
+                <button class="btn-icon btn-danger" 
+                        title="Eliminar" 
+                        onclick="eliminarItemPiqueo(${index})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        });
+    }
+
+    // ========== FUNCIÓN PARA ELIMINAR ITEM ==========
+    function eliminarItemPiqueo(index) {
+        if (confirm('¿Está seguro de que desea eliminar este item?')) {
+            const itemEliminado = itemsPiqueoManual[index];
+            console.log(`🗑️ Eliminando item: ${itemEliminado.codigoBarras}`);
+
+            itemsPiqueoManual.splice(index, 1);
+
+            actualizarTablaPiqueoManual();
+            actualizarResumenPiqueo();
+        }
+    }
+
+    // ========== FUNCIÓN PARA ACTUALIZAR RESUMEN ==========
+    function actualizarResumenPiqueo() {
+        const totalItems = itemsPiqueoManual.length;
+        const totalConteo = itemsPiqueoManual.reduce((sum, item) => sum + item.conteo, 0);
+
+        document.getElementById('totalItemsPiqueo').textContent = totalItems;
+        document.getElementById('totalConteoPiqueo').textContent = totalConteo;
+    }
+
+    // ========== FUNCIÓN PARA GUARDAR PIQUEO MANUAL ==========
+    async function guardarPiqueoManual() {
+        if (itemsPiqueoManual.length === 0) {
+            alert('⚠️ No hay items para guardar');
+            return;
+        }
+
+        if (!confirm(`¿Está seguro de que desea guardar ${itemsPiqueoManual.length} items?`)) {
+            return;
+        }
+
+        console.log('💾 Guardando piqueo manual...');
+        console.log('Código Sección:', currentCodigoSeccion);
+        console.log('Detalle Piqueo ID:', currentDetallePiqueoId);
+        console.log('Conteo ID:', currentConteoId);
+        console.log('Items:', itemsPiqueoManual);
+        console.log('Datos de Tienda:', datosTiendaPiqueo);
+
+        showLoading('Guardando piqueo manual...');
+
+        // ⭐ PREPARAR DATOS PARA ENVIAR AL BACKEND
+        const datosGuardar = {
+            conteo_id: currentConteoId,
+            codigo_seccion: currentCodigoSeccion,
+            detalle_piqueo_id: currentDetallePiqueoId,
+            items: itemsPiqueoManual,
+            sbs_no: datosTiendaPiqueo.sbs_no,
+            store_no: datosTiendaPiqueo.store_no,
+            cedula: datosTiendaPiqueo.cedula
+        };
+
+        console.log('📦 Datos a guardar:', datosGuardar);
+
+        try {
+            const response = await fetch('/guardar-piqueo-manual/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify(datosGuardar)
+            });
+
+            const data = await response.json();
+
+            hideLoading();
+
+            if (data.success) {
+                console.log('✅ Piqueo manual guardado:', data);
+
+                alert(`✅ Piqueo manual guardado exitosamente\n\n` +
+                    `Items procesados: ${data.items_procesados}\n` +
+                    `Total conteo: ${data.total_scan_count}\n` +
+                    `Detalle Piqueo ID: ${data.detalle_piqueo_id}`);
+
+                // Cerrar modal sin pedir confirmación porque ya se guardó exitosamente.
+                itemsPiqueoManual = [];
+                cerrarPiqueoManual(true);
+
+                // Recargar el detalle del piqueo para ver los cambios
+                if (currentConteoId) {
+                    cargarDetallePiqueo(currentConteoId);
+                }
+            } else {
+                alert('❌ Error: ' + data.message);
+            }
+
+        } catch (error) {
+            hideLoading();
+            console.error('❌ Error al guardar piqueo manual:', error);
+            alert('Error al guardar piqueo manual: ' + error.message);
+        }
+    }
+    // ========== EVENT LISTENER PARA ENTER EN CAMPOS ==========
+    document.addEventListener('DOMContentLoaded', function () {
+        // Enter en código de barras pasa al campo conteo
+        const inputCodigoBarras = document.getElementById('inputCodigoBarras');
+        if (inputCodigoBarras) {
+            inputCodigoBarras.addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('inputConteo').focus();
+                }
+            });
+        }
+
+        // Enter en conteo agrega el item
+        const inputConteo = document.getElementById('inputConteo');
+        if (inputConteo) {
+            inputConteo.addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    agregarItemPiqueoManual();
+                }
+            });
+        }
+    });
+</script>
+
+<style>
+    /* ========== ESTILOS PARA MODAL DE PIQUEO MANUAL ========== */
+    .modal-piqueo {
+        max-width: 700px;
+        width: 90%;
+    }
+
+    /* Formulario de piqueo */
+    .form-piqueo {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        border: 1px solid #e9ecef;
+        margin-bottom: 15px;
+    }
+
+    .form-row-piqueo {
+        display: grid;
+        grid-template-columns: 2fr 1fr auto;
+        gap: 10px;
+        align-items: end;
+    }
+
+    /* Estilos específicos para el campo de conteo - igual ancho que código de barras */
+    .form-group-conteo {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group-conteo label {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .form-group-conteo .form-control-piqueo {
+        width: 100%;
+        min-width: 100px;
+    }
+
+    .form-group-piqueo {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group-piqueo label {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+        font-size: 12px;
+    }
+
+    .form-control-piqueo {
+        padding: 8px 10px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        font-size: 12px;
+        transition: all 0.2s ease;
+        background: white;
+        height: 36px;
+        box-sizing: border-box;
+    }
+
+    .form-control-piqueo:focus {
+        outline: none;
+        border-color: #052F62;
+        box-shadow: 0 0 0 3px rgba(5, 47, 98, 0.1);
+    }
+
+    .btn-agregar-piqueo {
+        background: #052F62;
+        color: white;
+        border: none;
+        padding: 8px 15px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        font-size: 12px;
+        height: 36px;
+        white-space: nowrap;
+        width: 100%;
+        justify-content: center;
+    }
+
+    .btn-agregar-piqueo:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-agregar-piqueo i {
+        font-size: 12px;
+    }
+
+    /* Tabla de piqueo manual */
+    .tabla-piqueo-container {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        border: 1px solid #e9ecef;
+        margin-bottom: 15px;
+    }
+
+    .tabla-piqueo-container h3 {
+        margin: 0 0 10px 0;
+        color: #333;
+        font-size: 14px;
+    }
+
+    .tabla-piqueo-manual {
+        background: white;
+        border-radius: 6px;
+        font-size: 12px;
+    }
+
+    .tabla-piqueo-manual thead {
+        background: #052F62;
+        color: white;
+    }
+
+    .tabla-piqueo-manual thead th {
+        color: white;
+        font-weight: 600;
+        padding: 10px 8px;
+        font-size: 12px;
+    }
+
+    .tabla-piqueo-manual tbody tr {
+        transition: background 0.2s ease;
+    }
+
+    .tabla-piqueo-manual tbody tr:nth-child(even) {
+        background: #f8f9fa;
+    }
+
+    .tabla-piqueo-manual tbody tr:hover {
+        background: #e8f4f8;
+    }
+
+    .tabla-piqueo-manual tbody td {
+        padding: 8px;
+        vertical-align: middle;
+        border-bottom: 1px solid #e9ecef;
+        font-size: 12px;
+    }
+
+    /* Resumen de piqueo */
+    .resumen-piqueo {
+        background: #052F62;
+        color: white;
+        padding: 12px;
+        border-radius: 6px;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+    }
+
+    .resumen-piqueo p {
+        margin: 0;
+        font-size: 13px;
+    }
+
+    .resumen-piqueo strong {
+        font-weight: 600;
+    }
+
+    .resumen-piqueo span {
+        font-size: 16px;
+        font-weight: 700;
+        margin-left: 5px;
+    }
+
+    /* Botón guardar piqueo */
+    .btn-success-piqueo {
+        background: #052F62;
+        color: white;
+        width: auto;
+        min-width: 100px;
+        justify-content: center;
+    }
+
+    .btn-success-piqueo:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    /* Botón cancelar */
+    .btn-close {
+        background: #950404;
+        color: white;
+    }
+
+    .btn-close:hover {
+        background: #700202;
+        transform: translateY(-1px);
+    }
+
+    /* Botón actualizar todos */
+    .btn-warning-all {
+        background: #2980b9;
+        color: white;
+        /* Igualar tamaño al botón "Eliminar Todos" */
+        min-width: 100px;
+        width: auto;
+        padding: 6px 12px;
+        font-size: 0.85rem;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto; /* evitar que crezca dentro de contenedores flex */
+    }
+
+    .btn-warning-all:hover {
+        background: #1f618d;
+        transform: translateY(-1px);
+    }
+
+    /* Evitar que los botones dentro del header se expandan automáticamente */
+    .card-header-with-close > .btn {
+        flex: 0 0 auto;
+    }
+
+    /* Responsive para el modal de piqueo */
+    @media (max-width: 768px) {
+        .form-row-piqueo {
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .btn-agregar-piqueo {
+            width: 100%;
+            justify-content: center;
+        }
+
+        .resumen-piqueo {
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        /* En móviles, ambos campos ocupan todo el ancho */
+        .form-group-piqueo,
+        .form-group-conteo {
+            width: 100%;
+        }
+
+        .form-control-piqueo {
+            width: 100%;
+        }
+    }
+
+    /* ========== ESTILOS BASE ========== */
+    .action-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding: 12px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+    }
+
+    .btn {
+        padding: 8px 12px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        font-size: 11px;
+        height: 32px;
+    }
+
+    /* ========== ESTILOS PARA BOTÓN PIQUEO MANUAL ========== */
+    .btn-piqueo-manual {
+        background: #0a4a9c;
+        color: white;
+        width: auto;
+        min-width: 140px;
+        justify-content: center;
+    }
+
+    .btn-piqueo-manual:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-primary {
+        background: #052F62;
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+        background: #950404;
+        color: white;
+        width: auto;
+        min-width: 100px;
+        justify-content: center;
+    }
+
+    .btn-secondary:hover {
+        background: #700202ff;
+        transform: translateY(-1px);
+    }
+
+    .btn-close {
+        width: auto;
+        min-width: 100px;
+        background: #950404;
+        color: white;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-close:hover {
+        background: #700202ff;
+        transform: translateY(-1px);
+    }
+
+    .btn-close-secondary {
+        width: auto;
+        min-width: 100px;
+        background: #052F62;
+        color: white;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-close-secondary:hover {
+        background: #041d3d;
+        transform: translateY(-1px);
+    }
+
+    .btn-icon {
+        width: 27px;
+        height: 27px;
+        padding: 0;
+        border: none;
+        background: #052F62;
+        cursor: pointer;
+        border-radius: 6px;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
+        font-size: 1em;
+    }
+
+    .btn-icon i {
+        font-size: 1em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-icon:hover {
+        background: #031B38;
+        transform: translateY(-2px);
+    }
+
+    .btn-danger {
+        background: #950404 !important;
+    }
+
+    .btn-danger:hover {
+        background: #700202ff !important;
+    }
+
+    .btn-warning {
+        background: #052F62 !important;
+        margin-right: 5px;
+    }
+
+    .btn-warning:hover {
+        background: #052F62 !important;
+    }
+
+    .btn-success {
+        background: #28a745 !important;
+    }
+
+    .btn-success:hover {
+        background: #218838 !important;
+    }
+
+    /* ========== CARD CON HEADER Y CLOSE ========== */
+    .card-header-with-close {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .header-left-content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: nowrap;
+    }
+
+    .header-content {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+
+    .header-content h2 {
+        margin: 0;
+        color: #333;
+        font-size: 16px;
+    }
+
+    /* ========== ESTILOS DEL MODAL BASE ========== */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(2px);
+        animation: fadeIn 0.3s ease;
+    }
+
+    .modal.show {
+        display: block;
+    }
+
+    .modal-content {
+        background-color: white;
+        margin: 3% auto;
+        padding: 0;
+        border-radius: 10px;
+        width: 90%;
+        max-width: 850px;
+        max-height: 85vh;
+        overflow-y: auto;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        animation: slideIn 0.3s ease;
+    }
+
+    .modal-header {
+        padding: 15px;
+        border-bottom: 1px solid #e9ecef;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-header h2 {
+        color: #333;
+        margin: 0;
+        font-size: 18px;
+    }
+
+    .close {
+        background: rgba(255, 255, 255, 0.2);
+        border: none;
+        font-size: 22px;
+        cursor: pointer;
+        color: white;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: all 0.2s ease;
+    }
+
+    .close:hover {
+        background: #f8f9fa;
+        color: #333;
+    }
+
+    .modal-body {
+        padding: 15px;
+    }
+
+    .modal-footer {
+        padding: 15px;
+        border-top: 1px solid #e9ecef;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+
+    /* ========== FORMULARIO DE FILTROS ========== */
+    .filter-form {
+        display: grid;
+        gap: 15px;
+    }
+
+    .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group label {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+        font-size: 12px;
+    }
+
+    .form-control {
+        padding: 8px 10px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        font-size: 12px;
+        transition: all 0.2s ease;
+        background: white;
+        height: 30px;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: #052F62;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+    }
+
+    /* ========== FILTROS ACTIVOS ========== */
+    .active-filters {
+        margin: 15px 0;
+        padding: 12px;
+        background: white;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .active-filters h3 {
+        color: #333;
+        margin-bottom: 8px;
+        font-size: 14px;
+    }
+
+    .filter-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .filter-tag {
+        background: #e4e4e4;
+        color: #052F62;
+        padding: 5px 10px;
+        border-radius: 16px;
+        font-size: 11px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .filter-tag .remove {
+        background: none;
+        border: none;
+        color: #052F62;
+        cursor: pointer;
+        font-size: 12px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .filter-tag .remove:hover {
+        background: rgba(25, 118, 210, 0.1);
+    }
+
+    /* ========== TABLA DE DATOS ========== */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 11px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid #e4e4e4;
+    }
+
+    .data-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        font-size: 11px;
+    }
+
+    .data-table tr:hover {
+        background: #f8f9fa;
+    }
+
+    /* ========== BADGES DE ESTADO ========== */
+    .status-badge {
+        padding: 3px 6px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 500;
+    }
+
+    .status-activo {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .status-pendiente {
+        background: #fff3cd;
+        color: #856404;
+    }
+
+    .status-completado {
+        background: #d4edda;
+        color: #155724;
+    }
+
+    .status-en_proceso {
+        background: #c3dbf8ff;
+        color: #052F62;
+    }
+
+    /* ESTILO EXCLUSIVO PARA "CON ERROR" EN DETALLE PIQUEO */
+    .status-error-detalle {
+        background: #f8d7da;
+        color: #721c24;
+        font-weight: 600;
+    }
+
+    /* NUEVOS ESTILOS PARA EAN EN TABLA CÓDIGOS DE BARRAS */
+    .status-validado {
+        background: #d4edda;
+        color: #155724;
+        font-weight: 600;
+    }
+
+    .status-no-validado {
+        background: #f8d7da;
+        color: #721c24;
+        font-weight: 600;
+    }
+
+    /* ========== ANIMACIONES ========== */
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-40px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* ========== ESTADOS ADICIONALES ========== */
+    .table-responsive {
+        overflow-x: auto;
+    }
+
+    .card {
+        background: white;
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 15px;
+    }
+
+    .card h2 {
+        color: #333;
+        margin-bottom: 12px;
+        font-size: 16px;
+    }
+
+    /* ========== STAT-CARD BASE ========== */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+    }
+
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-left: 4px solid #052F62;
+        transition: all 0.3s ease;
+    }
+
+    .stat-card h3 {
+        font-size: 2em;
+        margin: 0;
+        color: #052F62;
+        font-weight: bold;
+    }
+
+    .stat-card small {
+        color: #666;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    /* ESTILOS ESPECÍFICOS PARA ESTADÍSTICAS DE EAN */
+    .stat-validado {
+        border-left: 4px solid #155724;
+    }
+
+    .stat-validado h3 {
+        color: #155724;
+    }
+
+    .stat-no-validado {
+        border-left: 4px solid #950404;
+    }
+
+    .stat-no-validado h3 {
+        color: #950404;
+    }
+
+    /* ========== MEJORAS VISUALES ========== */
+    .icon {
+        font-style: normal;
+    }
+
+    .content-header {
+        margin-bottom: 20px;
+    }
+
+    .content-header h1 {
+        color: #ffffffff;
+        margin: 0 0 8px 0;
+        font-size: 20px;
+    }
+
+    .content-header p {
+        color: #e4e4e4ff;
+        margin: 0;
+        font-size: 12px;
+    }
+
+    /* ========== HOVER EFFECTS ========== */
+    .btn:hover {
+        transform: translateY(-1px);
+    }
+
+    .btn-icon:hover {
+        transform: scale(1.05);
+    }
+
+    .data-table tbody tr:hover {
+        background: #f8f9fa !important;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        transition: all 0.2s ease;
+    }
+
+    /* ========== ACCESIBILIDAD ========== */
+    .btn:focus,
+    .form-control:focus,
+    .close:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+    }
+
+    /* ========== UTILIDADES ========== */
+    .text-center {
+        text-align: center;
+    }
+
+    .text-muted {
+        color: #666;
+    }
+
+    /* ========== LOADING OVERLAY ========== */
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(3px);
+    }
+
+    .loading-spinner {
+        text-align: center;
+        background: white;
+        padding: 25px 40px;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #052F62;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    .loading-spinner p {
+        margin: 0;
+        color: #333;
+        font-weight: 600;
+        font-size: 14px;
+    }
+
+    /* ========== ESTILOS PARA MODAL DE ESTADÍSTICAS ========== */
+    .modal-estadisticas {
+        max-width: 850px;
+        width: 95%;
+    }
+
+    /* AJUSTES ESPECÍFICOS PARA INFO-CONTEO-ESTADISTICAS MÁS COMPACTO */
+    .info-conteo-estadisticas {
+        padding: 12px 15px;
+        background: #ffffff;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid #f1f1f1;
+        font-size: 11px;
+    }
+
+    .info-row:last-child {
+        border-bottom: none;
+    }
+
+    .info-row strong {
+        color: #333;
+        font-weight: 600;
+        font-size: 11px;
+    }
+
+    .info-row span {
+        color: #666;
+        font-size: 11px;
+    }
+
+    /* AJUSTES ESPECÍFICOS PARA STAT-CARD-MODAL MÁS COMPACTOS */
+    .stats-grid-modal {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
+        margin: 15px;
+    }
+
+    .stat-card-modal {
+        background: white;
+        padding: 8px 6px;
+        border-radius: 8px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-left: 3px solid #052F62;
+        transition: all 0.3s ease;
+    }
+
+    .stat-card-modal:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .stat-icon {
+        font-size: 1.5em;
+        margin-bottom: 6px;
+        display: block;
+    }
+
+    .stat-card-modal h3 {
+        font-size: 1.5em;
+        margin: 6px 0;
+        color: #052F62;
+        font-weight: bold;
+    }
+
+    .stat-card-modal small {
+        color: #666;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 600;
+    }
+
+    /* Barra de Progreso */
+    .progress-container {
+        padding: 15px;
+        background: white;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .progress-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        font-weight: 600;
+        color: #333;
+        font-size: 12px;
+    }
+
+    .progress-percentage {
+        font-size: 1.2em;
+        color: #052F62;
+        font-weight: bold;
+    }
+
+    .progress-bar-container {
+        width: 100%;
+        height: 16px;
+        background: #e9ecef;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #052F62 0%, #0a4a9c 100%);
+        border-radius: 8px;
+        transition: width 0.8s ease;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-right: 10px;
+        color: white;
+        font-weight: bold;
+        font-size: 9px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .progress-bar::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        right: 0;
+        background: linear-gradient(90deg,
+                rgba(255, 255, 255, 0.1) 0%,
+                rgba(255, 255, 255, 0.2) 50%,
+                rgba(255, 255, 255, 0.1) 100%);
+        animation: shimmer 2s infinite;
+    }
+
+    @keyframes shimmer {
+        0% {
+            transform: translateX(-100%);
+        }
+
+        100% {
+            transform: translateX(100%);
+        }
+    }
+
+    /* ESTILO PARA BOTÓN DE ESTADÍSTICAS */
+    .btn-stats {
+        background: #0b458bff !important;
+    }
+
+    .btn-stats:hover {
+        background: #023169ff !important;
+        transform: scale(1.05);
+    }
+
+    /* ========== NUEVOS ESTILOS PARA DETALLE EN MODAL COMPACTO ========== */
+    .detalle-section-modal {
+        padding: 15px;
+        background: white;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .detalle-header-modal {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .detalle-header-modal h3 {
+        margin: 0;
+        color: #333;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .table-container-modal {
+        max-height: 300px;
+        overflow-y: auto;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        margin: 0 -5px;
+    }
+
+    .tabla-detalle-modal {
+        background: white;
+        border-radius: 6px;
+        font-size: 9px;
+        margin: 0;
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+    }
+
+    .tabla-detalle-modal thead {
+        background: #052F62;
+        color: white;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .tabla-detalle-modal thead th {
+        color: #000000ff;
+        font-weight: 600;
+        padding: 6px 4px;
+        font-size: 9px;
+        white-space: nowrap;
+        text-align: left;
+        box-sizing: border-box;
+    }
+
+    .tabla-detalle-modal thead th:last-child {
+        border-right: none;
+    }
+
+    .tabla-detalle-modal tbody tr {
+        transition: background 0.2s ease;
+    }
+
+    .tabla-detalle-modal tbody tr:nth-child(even) {
+        background: #f8f9fa;
+    }
+
+    .tabla-detalle-modal tbody tr:hover {
+        background: #e8f4f8;
+    }
+
+    .tabla-detalle-modal tbody td {
+        padding: 5px 4px;
+        vertical-align: middle;
+        border-bottom: 1px solid #e9ecef;
+        font-size: 8px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 80px;
+        text-align: left;
+        box-sizing: border-box;
+    }
+
+    /* Columnas específicas con anchos optimizados */
+    .tabla-detalle-modal .col-grupo {
+        width: 20%;
+        min-width: 90px;
+    }
+
+    .tabla-detalle-modal .col-secuencia {
+        width: 20%;
+        min-width: 90px;
+    }
+
+    .tabla-detalle-modal .col-ubicacion {
+        width: 20%;
+        min-width: 90px;
+    }
+
+    .tabla-detalle-modal .col-codigo {
+        width: 25%;
+        min-width: 120px;
+    }
+
+    .tabla-detalle-modal .col-estado {
+        width: 15%;
+        min-width: 95px;
+    }
+
+    /* ========== ESTILOS PARA SECCIÓN DE COLABORADORES ========== */
+    .colaboradores-section {
+        padding: 15px;
+        background: white;
+    }
+
+    .colaboradores-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .colaboradores-header h3 {
+        margin: 0;
+        color: #333;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .total-escaneados-badge {
+        background: #052F62;
+        color: white;
+        padding: 5px 12px;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        box-shadow: 0 2px 6px rgba(5, 47, 98, 0.2);
+        font-size: 11px;
+    }
+
+    .total-escaneados-badge span {
+        font-size: 10px;
+        font-weight: 500;
+    }
+
+    .total-escaneados-badge strong {
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    .tabla-colaboradores {
+        background: white;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid #e9ecef;
+        font-size: 11px;
+    }
+
+    .tabla-colaboradores thead {
+        background: #052F62;
+        color: white;
+    }
+
+    .tabla-colaboradores thead th {
+        color: white;
+        font-weight: 600;
+        padding: 10px 8px;
+        font-size: 11px;
+    }
+
+    .tabla-colaboradores tbody tr {
+        transition: background 0.2s ease;
+    }
+
+    .tabla-colaboradores tbody tr:nth-child(even) {
+        background: #f8f9fa;
+    }
+
+    .tabla-colaboradores tbody tr:hover {
+        background: #e8f4f8;
+    }
+
+    .tabla-colaboradores tbody td {
+        padding: 8px;
+        vertical-align: middle;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .cantidad-badge {
+        background: #155724;
+        color: white;
+        padding: 4px 10px;
+        border-radius: 14px;
+        font-weight: 700;
+        font-size: 10px;
+        display: inline-block;
+        min-width: 45px;
+    }
+
+    /* ========== ESTILO PARA BOTÓN DESHABILITADO ========== */
+    .btn-disabled {
+        background: #6c757d !important;
+        cursor: not-allowed !important;
+        opacity: 0.6;
+    }
+
+    .btn-disabled:hover {
+        background: #6c757d !important;
+        transform: none !important;
+    }
+
+    /* ========== MEDIA QUERY ESPECÍFICA PARA 1024x768 ========== */
+    @media screen and (max-width: 1024px) and (max-height: 768px) {
+
+        /* Ajustes generales para pantalla pequeña */
+        body {
+            font-size: 11px;
+            overflow-x: hidden;
+        }
+
+        /* Contenido principal más compacto */
+        .main-content {
+            padding: 10px;
+            margin-top: 20px;
+        }
+
+        .content-header {
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .content-header h1 {
+            font-size: 18px;
+        }
+
+        .content-header p {
+            font-size: 11px;
+        }
+
+        /* Cards más compactos */
+        .card {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+        }
+
+        .card h2 {
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        /* ========== STAT-CARD AJUSTADOS PARA 1024x768 ========== */
+        .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            padding: 12px 8px;
+            border-radius: 8px;
+            border-left: 3px solid #052F62;
+        }
+
+        .stat-card h3 {
+            font-size: 1.5em;
+            margin-bottom: 4px;
+        }
+
+        .stat-card small {
+            font-size: 11px;
+        }
+
+        /* Tablas ultra compactas */
+        .data-table {
+            font-size: 10px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 6px 8px;
+        }
+
+        .data-table th {
+            font-size: 10px;
+            padding: 8px 8px;
+        }
+
+        /* Botones más pequeños */
+        .btn {
+            padding: 6px 10px;
+            font-size: 10px;
+            height: 28px;
+        }
+
+        .btn-icon {
+            width: 26px;
+            height: 26px;
+            font-size: 0.9em;
+        }
+
+        /* Modal más compacto */
+        .modal-content {
+            margin: 2% auto;
+            max-width: 600px;
+        }
+
+        .modal-header {
+            padding: 12px;
+        }
+
+        .modal-body {
+            padding: 12px;
+        }
+
+        .modal-footer {
+            padding: 12px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA ESTADÍSTICAS EN 1024x768 */
+        .stats-grid-modal {
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 10px;
+            margin: 12px;
+        }
+
+        .stat-card-modal {
+            padding: 6px 4px;
+        }
+
+        .stat-card-modal h3 {
+            font-size: 1.4em;
+        }
+
+        .stat-card-modal small {
+            font-size: 9px;
+        }
+
+        .info-conteo-estadisticas {
+            padding: 10px 12px;
+        }
+
+        .info-row {
+            padding: 5px 0;
+            font-size: 10px;
+        }
+
+        .progress-container {
+            padding: 12px;
+        }
+
+        .colaboradores-section {
+            padding: 12px;
+        }
+
+        .tabla-colaboradores thead th,
+        .tabla-colaboradores tbody td {
+            padding: 6px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA DETALLE EN MODAL EN 1024x768 */
+        .detalle-section-modal {
+            padding: 12px;
+        }
+
+        .table-container-modal {
+            max-height: 250px;
+        }
+
+        .tabla-detalle-modal {
+            font-size: 8px;
+        }
+
+        .tabla-detalle-modal thead th,
+        .tabla-detalle-modal tbody td {
+            padding: 4px 3px;
+            font-size: 7px;
+        }
+
+        .tabla-detalle-modal .col-grupo {
+            width: 20%;
+            min-width: 80px;
+        }
+
+        .tabla-detalle-modal .col-secuencia {
+            width: 20%;
+            min-width: 80px;
+        }
+
+        .tabla-detalle-modal .col-ubicacion {
+            width: 20%;
+            min-width: 80px;
+        }
+
+        .tabla-detalle-modal .col-codigo {
+            width: 25%;
+            min-width: 100px;
+        }
+
+        .tabla-detalle-modal .col-estado {
+            width: 15%;
+            min-width: 85px;
+        }
+    }
+
+    /* ========== AJUSTES ESPECÍFICOS PARA ALTURA 768px ========== */
+    @media screen and (max-width: 1024px) and (max-height: 768px) and (min-width: 769px) {
+
+        /* Optimizar espacio vertical */
+        .main-content {
+            min-height: calc(100vh - 60px);
+        }
+
+        /* ========== STAT-CARD MÁS COMPACTOS PARA ALTURA 768px ========== */
+        .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+        }
+
+        .stat-card {
+            padding: 10px 6px;
+        }
+
+        .stat-card h3 {
+            font-size: 1.4em;
+        }
+
+        .stat-card small {
+            font-size: 10px;
+        }
+
+        /* Compactar aún más los elementos */
+        .card {
+            padding: 8px;
+        }
+
+        .data-table {
+            font-size: 9px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 5px 6px;
+        }
+
+        /* Reducir aún más los botones */
+        .btn {
+            padding: 5px 8px;
+            font-size: 9px;
+            height: 26px;
+        }
+
+        .btn-icon {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA ESTADÍSTICAS EN ALTURA 768px */
+        .stats-grid-modal {
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 8px;
+            margin: 10px;
+        }
+
+        .stat-card-modal {
+            padding: 5px 3px;
+        }
+
+        .stat-card-modal h3 {
+            font-size: 1.3em;
+        }
+
+        .stat-card-modal small {
+            font-size: 8px;
+        }
+
+        .info-conteo-estadisticas {
+            padding: 8px 10px;
+        }
+
+        .info-row {
+            padding: 4px 0;
+            font-size: 9px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA DETALLE EN MODAL EN ALTURA 768px */
+        .detalle-section-modal {
+            padding: 10px;
+        }
+
+        .table-container-modal {
+            max-height: 200px;
+        }
+
+        .tabla-detalle-modal {
+            font-size: 7px;
+        }
+
+        .tabla-detalle-modal thead th,
+        .tabla-detalle-modal tbody td {
+            padding: 3px 2px;
+            font-size: 6px;
+        }
+
+        .tabla-detalle-modal .col-grupo {
+            width: 20%;
+            min-width: 70px;
+        }
+
+        .tabla-detalle-modal .col-secuencia {
+            width: 20%;
+            min-width: 70px;
+        }
+
+        .tabla-detalle-modal .col-ubicacion {
+            width: 20%;
+            min-width: 70px;
+        }
+
+        .tabla-detalle-modal .col-codigo {
+            width: 25%;
+            min-width: 85px;
+        }
+
+        .tabla-detalle-modal .col-estado {
+            width: 15%;
+            min-width: 70px;
+        }
+    }
+
+    /* ========== RESPONSIVE DESIGN ========== */
+    @media (max-width: 768px) {
+        .action-bar {
+            flex-direction: column;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .modal-content {
+            margin: 1% auto;
+            width: 98%;
+        }
+
+        .filter-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .modal-footer {
+            flex-direction: column;
+        }
+
+        .data-table {
+            font-size: 10px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 6px;
+            font-size: 10px;
+        }
+
+        .btn {
+            padding: 6px 10px;
+        }
+
+        .filter-tags {
+            gap: 4px;
+        }
+
+        .filter-tag {
+            font-size: 10px;
+            padding: 3px 6px;
+        }
+
+        .card-header-with-close {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .header-left-content {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .header-content {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .colaboradores-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .total-escaneados-badge {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        .tabla-colaboradores {
+            font-size: 10px;
+        }
+
+        .tabla-colaboradores thead th,
+        .tabla-colaboradores tbody td {
+            padding: 6px;
+        }
+
+        .cantidad-badge {
+            font-size: 10px;
+            padding: 3px 8px;
+        }
+
+        /* ========== STAT-CARD PARA MÓVILES ========== */
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .stat-card {
+            padding: 15px 10px;
+        }
+
+        .stat-card h3 {
+            font-size: 1.6em;
+        }
+
+        .stat-card small {
+            font-size: 11px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA ESTADÍSTICAS EN MÓVILES */
+        .stats-grid-modal {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin: 10px;
+        }
+
+        .stat-card-modal {
+            padding: 8px 6px;
+        }
+
+        .stat-card-modal h3 {
+            font-size: 1.4em;
+        }
+
+        .stat-card-modal small {
+            font-size: 9px;
+        }
+
+        .info-conteo-estadisticas {
+            padding: 10px;
+        }
+
+        .info-row {
+            padding: 5px 0;
+            font-size: 10px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA DETALLE EN MODAL EN MÓVILES */
+        .detalle-section-modal {
+            padding: 10px;
+        }
+
+        .table-container-modal {
+            max-height: 250px;
+        }
+
+        .tabla-detalle-modal {
+            font-size: 8px;
+        }
+
+        .tabla-detalle-modal thead th,
+        .tabla-detalle-modal tbody td {
+            padding: 4px 3px;
+            font-size: 7px;
+        }
+    }
+
+    /* ========== AJUSTES PARA PANTALLAS MUY PEQUEÑAS ========== */
+    @media (max-width: 480px) {
+        .stats-grid {
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+
+        .stat-card {
+            padding: 12px 8px;
+        }
+
+        .stat-card h3 {
+            font-size: 1.5em;
+        }
+
+        .stat-card small {
+            font-size: 10px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA ESTADÍSTICAS EN PANTALLAS MUY PEQUEÑAS */
+        .stats-grid-modal {
+            grid-template-columns: 1fr;
+            gap: 6px;
+            margin: 8px;
+        }
+
+        .stat-card-modal {
+            padding: 10px 8px;
+        }
+
+        .stat-card-modal h3 {
+            font-size: 1.6em;
+        }
+
+        .stat-card-modal small {
+            font-size: 10px;
+        }
+
+        .info-conteo-estadisticas {
+            padding: 8px;
+        }
+
+        .info-row {
+            padding: 4px 0;
+            font-size: 9px;
+        }
+
+        /* AJUSTES ESPECÍFICOS PARA DETALLE EN MODAL EN PANTALLAS MUY PEQUEÑAS */
+        .detalle-section-modal {
+            padding: 8px;
+        }
+
+        .table-container-modal {
+            max-height: 200px;
+        }
+
+        .tabla-detalle-modal {
+            font-size: 7px;
+        }
+
+        .tabla-detalle-modal thead th,
+        .tabla-detalle-modal tbody td {
+            padding: 3px 2px;
+            font-size: 6px;
+        }
+    }
+
+    /* Agregar al final de tu sección <style> */
+    .form-control-piqueo.validando {
+        border-color: #ffc107;
+        background-color: #fff9e6;
+    }
+
+    .form-control-piqueo.valido {
+        border-color: #28a745;
+        background-color: #e8f5e9;
+    }
+
+    .form-control-piqueo.invalido {
+        border-color: #dc3545;
+        background-color: #ffe6e6;
+    }
+</style>
+
+{% csrf_token %}
+{% endblock %}

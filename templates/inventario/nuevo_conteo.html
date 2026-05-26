@@ -1,0 +1,1820 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Menú Hamburguesa -->
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <!-- Overlay para menú móvil -->
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Menú Lateral -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                
+            </ul>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Contenido Principal -->
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Planificación de Nuevo Conteo</h1>
+            <p>Complete los datos para crear un nuevo proceso de inventario</p>
+        </div>
+
+        <!-- Formulario de Planificación -->
+        <div class="card">
+            <form id="formPlanificacion" method="post" action="#">
+                {% csrf_token %}
+                
+                <div class="form-section">
+                    <h3>Datos Principales</h3>
+                    <div class="form-row" style="grid-template-columns: repeat(2, 1fr);">
+                        <div class="form-group">
+                            <label for="pais">PAÍS:</label>
+                            <select id="pais" name="pais" required>
+                                <option value="">Cargando países...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="centro">CENTRO:</label>
+                            <select id="centro" name="centro" required disabled>
+                                <option value="">Seleccione primero un país</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="almacen">TIENDA:</label>
+                            <select id="almacen" name="almacen" required disabled>
+                                <option value="">Seleccione primero un centro</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="responsable">RESPONSABLE:</label>
+                            <select id="responsable" name="responsable" required disabled>
+                                <option value="">Seleccione primero una tienda</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="fecha_inicio">FECHA_INICIO:</label>
+                            <input type="date" id="fecha_inicio" name="fecha_inicio" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="fecha_fin">FECHA_FIN:</label>
+                            <input type="date" id="fecha_fin" name="fecha_fin" required>
+                        </div>
+                        <div class="form-group" style="grid-column: 1 / span 2;">
+                            <label for="centro_costo">CENTRO_COSTO:</label>
+                            <input type="text" id="centro_costo" name="centro_costo" readonly>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>Detalle de Artículos</h3>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="grupo_articulos">GRUPO_ARTICULOS:</label>
+                            <select id="grupo_articulos" name="grupo_articulos">
+                                <option value="">Seleccione...</option>
+                                <option value="Todos">Todos</option>
+                                <option value="Ropa">Ropa</option>
+                                <option value="Zapatos">Zapatos</option>
+                                <option value="Accesorios">Accesorios</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="linea">LINEA:</label>
+                            <select id="lineaDropdown" style="width:100%;">
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="marca">MARCA:</label>
+                            <select id="marcaDropdown" style="width:100%;">
+                                <!-- Las opciones se llenarán dinámicamente -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="observaciones">OBSERVACIONES:</label>
+                            <textarea id="observaciones" name="observaciones" rows="2"></textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- Botón para agregar artículo a la tabla -->
+                    <div class="form-actions">
+                        <button type="button" id="btnAgregarArticulo" class="btn btn-success">
+                            <i class="icon">+</i> Agregar Artículo
+                        </button>
+                    </div>
+                    
+                    <!-- Tabla de artículos agregados -->
+                    <div class="tabla-articulos-container">
+                        <h4>Artículos Agregados</h4>
+                        <table id="tablaArticulos" class="tabla-articulos">
+                            <thead>
+                                <tr>
+                                    <th>GRUPO_ARTICULOS</th>
+                                    <th>LINEA</th>
+                                    <th>MARCA</th>
+                                    <th>OBSERVACIONES</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Los artículos se agregarán aquí dinámicamente -->
+                            </tbody>
+                        </table>
+                        <div id="mensajeTablaVacia" class="mensaje-tabla-vacia">
+                            No hay artículos agregados. Use el botón "+ Agregar Artículo" para añadir artículos.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <a href="{% url 'administracion_conteo' %}" class="btn btn-secondary">
+                        Cancelar
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        Guardar Conteo
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<script>
+// Establecer fecha mínima en fecha_inicio (no permitir fechas pasadas)
+const hoy = new Date();
+const fechaFormateada = hoy.toISOString().split('T')[0];
+
+const fechaInicioInput = document.getElementById('fecha_inicio');
+if (fechaInicioInput) {
+    fechaInicioInput.setAttribute('min', fechaFormateada);
+}
+$(document).ready(function() {
+    // Llama al webservice para obtener las líneas
+    fetch('https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/lineas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Llena el select con las opciones recibidas
+        const $dropdown = $('#lineaDropdown');
+        $dropdown.empty();
+        $dropdown.append('<option value="">Seleccione una línea...</option>');
+        data.forEach(item => {
+            $dropdown.append(
+                `<option value="${item.linea}">${item.descripcion} (${item.linea})</option>`
+            );
+        });
+        // Inicializa Select2 con búsqueda
+        $dropdown.select2({
+            placeholder: 'Seleccione una línea',
+            allowClear: true,
+            width: 'resolve',
+            dropdownParent: $('.main-content') // Ajusta si tu modal es diferente
+        });
+    });
+});
+$(document).ready(function() {
+    // Llama al webservice para obtener las marcas
+    fetch('https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/marcas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Llena el select con las opciones recibidas
+        const $dropdown = $('#marcaDropdown');
+        $dropdown.empty();
+        $dropdown.append('<option value="">Seleccione una marca...</option>');
+        data.forEach(item => {
+            $dropdown.append(
+                `<option value="${item.marca}">${item.descripcion} (${item.marca})</option>`
+            );
+        });
+        // Inicializa Select2 con búsqueda
+        $dropdown.select2({
+            placeholder: 'Seleccione una marca',
+            allowClear: true,
+            width: 'resolve',
+            dropdownParent: $('.main-content') // Ajusta si tu modal es diferente
+        });
+    });
+});
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM cargado - Iniciando carga de países');
+
+    // Elementos del DOM
+    const selectPais = document.getElementById('pais');
+    const selectCentro = document.getElementById('centro');
+    const selectAlmacen = document.getElementById('almacen');
+    const selectResponsable = document.getElementById('responsable');
+    const inputCentroCosto = document.getElementById('centro_costo');
+    
+    // Elementos para la funcionalidad de artículos
+    const btnAgregarArticulo = document.getElementById('btnAgregarArticulo');
+    const tablaArticulos = document.getElementById('tablaArticulos').getElementsByTagName('tbody')[0];
+    const mensajeTablaVacia = document.getElementById('mensajeTablaVacia');
+    const inputGrupoArticulos = document.getElementById('grupo_articulos');
+    const lineaDropdown = document.getElementById('lineaDropdown');
+    const marcaDropdown = document.getElementById('marcaDropdown');
+
+    const textareaObservaciones = document.getElementById('observaciones');
+    
+    if (inputGrupoArticulos) {
+        inputGrupoArticulos.addEventListener('change', function() {
+            if (this.value === 'Todos') {
+                if (lineaDropdown) {
+                    lineaDropdown.disabled = true;
+                    lineaDropdown.value = '';
+                    if (window.jQuery) $(lineaDropdown).trigger('change');
+                }
+                if (marcaDropdown) {
+                    marcaDropdown.disabled = true;
+                    marcaDropdown.value = '';
+                    if (window.jQuery) $(marcaDropdown).trigger('change');
+                }
+            } else {
+                if (lineaDropdown) lineaDropdown.disabled = false;
+                if (marcaDropdown) marcaDropdown.disabled = false;
+            }
+        });
+    }
+    
+
+    // Al cargar la página, asegúrate de que estén bien configurados
+    if (inputGrupoArticulos.value === 'Todos') {
+        inputLinea.disabled = true;
+        inputMarca.disabled = true;
+    }
+
+    // Variable para almacenar los datos de los almacenes
+    let datosAlmacenes = [];
+    
+    // Variable para contar los artículos agregados
+    let contadorArticulos = 0;
+
+    // CORRECCIÓN: Función para eliminar artículo de la tabla - MEJORADA
+    function eliminarArticulo(id) {
+        console.log('Intentando eliminar artículo con ID:', id);
+        
+        // Buscar la fila por el atributo data-id
+        const fila = document.querySelector(`tr[data-id="${id}"]`);
+        console.log('Fila encontrada:', fila);
+        
+        if (fila) {
+            fila.remove();
+            actualizarVisibilidadTabla();
+            // Reactivar el botón si la tabla queda vacía
+            if (tablaArticulos.rows.length === 0) {
+                btnAgregarArticulo.disabled = false;
+            }
+            console.log('✅ Artículo eliminado de la tabla');
+        } else {
+            console.error('❌ No se pudo encontrar la fila con ID:', id);
+        }
+    }
+
+    // CORRECCIÓN: Delegación de eventos para los botones eliminar
+    function configurarEliminacionDelegada() {
+        // Usar delegación de eventos para manejar los botones eliminar
+        if (tablaArticulos) {
+            tablaArticulos.addEventListener('click', function(e) {
+                if (e.target && e.target.classList.contains('btn-eliminar')) {
+                    const fila = e.target.closest('tr');
+                    const id = fila.getAttribute('data-id');
+                    console.log('Eliminando artículo mediante delegación, ID:', id);
+                    eliminarArticulo(id);
+                }
+            });
+        }
+    }
+
+    // Función para agregar artículo a la tabla
+    function agregarArticuloATabla() {
+        // Solo permitir agregar si la tabla está vacía
+        if (tablaArticulos.rows.length > 0) {
+            alert('Solo puede agregar un artículo. Elimine el existente para agregar uno nuevo.');
+            return;
+        }
+        const grupoArticulos = inputGrupoArticulos.value.trim();
+        // Para Select2, toma el texto seleccionado
+        const linea = lineaDropdown.disabled ? '' : $('#lineaDropdown').select2('data')[0]?.text || '';
+        const marca = marcaDropdown.disabled ? '' : $('#marcaDropdown').select2('data')[0]?.text || '';
+        const observaciones = textareaObservaciones.value.trim();
+    
+        // Validar que al menos un campo tenga datos
+        if (!grupoArticulos && !linea && !marca && !observaciones) {
+            alert('Por favor, ingrese al menos un dato para el artículo.');
+            return;
+        }
+    
+        // Crear nueva fila
+        const nuevaFila = tablaArticulos.insertRow();
+        const idArticulo = contadorArticulos;
+        nuevaFila.setAttribute('data-id', idArticulo);
+    
+        // Agregar celdas con los datos
+        const celdaGrupo = nuevaFila.insertCell(0);
+        const celdaLinea = nuevaFila.insertCell(1);
+        const celdaMarca = nuevaFila.insertCell(2);
+        const celdaObservaciones = nuevaFila.insertCell(3);
+        const celdaAcciones = nuevaFila.insertCell(4);
+    
+        celdaGrupo.textContent = grupoArticulos || '-';
+        celdaLinea.textContent = linea || '-';
+        celdaMarca.textContent = marca || '-';
+        celdaObservaciones.textContent = observaciones || '-';
+    
+        // Crear botón de eliminar - CORREGIDO
+        const btnEliminar = document.createElement('button');
+        btnEliminar.type = 'button';
+        btnEliminar.className = 'btn btn-danger btn-eliminar';
+        btnEliminar.innerHTML = 'Eliminar';
+        btnEliminar.setAttribute('data-target-id', idArticulo);
+        celdaAcciones.appendChild(btnEliminar);
+    
+        // Incrementar contador
+        contadorArticulos++;
+    
+        // Limpiar campos del formulario
+        inputGrupoArticulos.value = '';
+        $('#lineaDropdown').val('').trigger('change');
+        $('#marcaDropdown').val('').trigger('change');
+        textareaObservaciones.value = '';
+    
+        // Ocultar mensaje de tabla vacía si es necesario
+        actualizarVisibilidadTabla();
+    
+        // Desactivar el botón después de agregar
+        btnAgregarArticulo.disabled = true;
+        console.log('Artículo agregado a la tabla con ID:', idArticulo);
+    }
+    
+    // Función para actualizar la visibilidad de la tabla y el mensaje
+    function actualizarVisibilidadTabla() {
+        const tieneFilas = tablaArticulos.rows.length > 0;
+        
+        if (tieneFilas) {
+            tablaArticulos.parentElement.style.display = 'block';
+            mensajeTablaVacia.style.display = 'none';
+        } else {
+            tablaArticulos.parentElement.style.display = 'none';
+            mensajeTablaVacia.style.display = 'block';
+        }
+    }
+    
+    // Event listener para el botón de agregar artículo
+    if (btnAgregarArticulo) {
+        btnAgregarArticulo.addEventListener('click', function(e) {
+            // Solo ejecuta si el botón está habilitado
+            if (btnAgregarArticulo.disabled) return;
+            agregarArticuloATabla();
+        });
+    }
+
+    // Configurar la delegación de eventos al cargar la página
+    configurarEliminacionDelegada();
+
+    // Función para cargar países con debugging MEJORADO
+    async function cargarPaises() {
+        console.log('Iniciando carga de países...');
+        
+        try {
+            if (!selectPais) {
+                console.error('selectPais no encontrado en el DOM');
+                return;
+            }
+
+            selectPais.disabled = true;
+            selectPais.innerHTML = '<option value="">Cargando países...</option>';
+            
+            console.log('Haciendo request a web service de países...');
+            
+            const response = await fetch('https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getPais', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            console.log('Response recibido:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error en response:', errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            console.log('Datos recibidos (RAW):', data);
+            console.log('Tipo de datos:', typeof data);
+            console.log('Es array?:', Array.isArray(data));
+
+            // Poblar el select
+            selectPais.innerHTML = '';
+            
+            // Manejar diferentes estructuras de respuesta
+            let paisesArray = [];
+            
+            if (Array.isArray(data)) {
+                // Si es un array directamente
+                paisesArray = data;
+                console.log('Datos recibidos como array');
+            } else if (data && typeof data === 'object') {
+                // Si es un objeto, buscar arrays dentro
+                if (data.paises && Array.isArray(data.paises)) {
+                    paisesArray = data.paises;
+                    console.log('Datos encontrados en propiedad "paises"');
+                } else if (data.data && Array.isArray(data.data)) {
+                    paisesArray = data.data;
+                    console.log('Datos encontrados en propiedad "data"');
+                } else if (data.resultado && Array.isArray(data.resultado)) {
+                    paisesArray = data.resultado;
+                    console.log('Datos encontrados en propiedad "resultado"');
+                } else {
+                    // Intentar convertir las propiedades del objeto en array
+                    paisesArray = Object.values(data).filter(item => 
+                        item && typeof item === 'object' && item.pais
+                    );
+                    if (paisesArray.length === 0) {
+                        // Si no encontramos objetos con propiedad 'pais', usar todos los valores
+                        paisesArray = Object.values(data).filter(item => item);
+                    }
+                    console.log('Datos extraídos de propiedades del objeto');
+                }
+            }
+            
+            console.log('Países procesados:', paisesArray);
+            
+            if (paisesArray && paisesArray.length > 0) {
+                console.log(`${paisesArray.length} países encontrados`);
+                
+                // Opción por defecto
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- Seleccione un país --';
+                selectPais.appendChild(defaultOption);
+                
+                // Agregar países - manejar diferentes estructuras
+                paisesArray.forEach((pais, index) => {
+                    const option = document.createElement('option');
+                    
+                    // Manejar diferentes estructuras de país
+                    let valorPais = '';
+                    let textoPais = '';
+                    
+                    if (typeof pais === 'string') {
+                        valorPais = pais;
+                        textoPais = pais;
+                    } else if (pais.pais) {
+                        valorPais = pais.pais;
+                        textoPais = pais.pais;
+                    } else if (pais.nombre) {
+                        valorPais = pais.nombre;
+                        textoPais = pais.nombre;
+                    } else if (pais.codigo) {
+                        valorPais = pais.codigo;
+                        textoPais = pais.nombre || pais.codigo;
+                    } else if (pais.descripcion) {
+                        valorPais = pais.descripcion;
+                        textoPais = pais.descripcion;
+                    } else {
+                        valorPais = JSON.stringify(pais);
+                        textoPais = `País ${index + 1}`;
+                    }
+                    
+                    option.value = valorPais;
+                    option.textContent = textoPais;
+                    selectPais.appendChild(option);
+                    console.log(`País agregado: ${valorPais} - ${textoPais}`);
+                });
+            } else {
+                console.log('ℹNo hay países disponibles o estructura desconocida');
+                console.log('Estructura completa:', data);
+                
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No hay países disponibles';
+                selectPais.appendChild(option);
+                
+                // Mostrar la estructura en consola para debug
+                if (data && typeof data === 'object') {
+                    console.log('Propiedades del objeto:', Object.keys(data));
+                    console.log('Valores del objeto:', Object.values(data));
+                }
+            }
+
+        } catch (error) {
+            console.error('Error en carga de países:', error);
+            
+            // Mostrar error en el select
+            selectPais.innerHTML = '';
+            const errorOption = document.createElement('option');
+            errorOption.value = '';
+            errorOption.textContent = 'Error al cargar países';
+            selectPais.appendChild(errorOption);
+            
+            // Mostrar alerta al usuario
+            alert('Error al cargar los países. Verifica la consola para más detalles.');
+            
+        } finally {
+            selectPais.disabled = false;
+            console.log('Carga de países finalizada');
+        }
+    }
+
+    // Función para cargar centros con debugging
+    async function cargarCentros(pais) {
+        console.log('Iniciando carga de centros para país:', pais);
+        
+        try {
+            if (!selectCentro) {
+                console.error('selectCentro no encontrado en el DOM');
+                return;
+            }
+
+            selectCentro.disabled = true;
+            selectCentro.innerHTML = '<option value="">Cargando centros...</option>';
+            
+            console.log('Haciendo request a web service de centros...');
+            
+            const response = await fetch('https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getcenters', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({"pais": pais.toLowerCase()})
+            });
+
+            console.log('Response recibido:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error en response:', errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            console.log('Datos recibidos:', data);
+
+            // Poblar el select
+            selectCentro.innerHTML = '';
+            
+            if (data && data.length > 0) {
+                console.log(`${data.length} centros encontrados`);
+                
+                // Opción por defecto
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- Seleccione un centro --';
+                selectCentro.appendChild(defaultOption);
+                
+                // Ordenar y agregar centros
+                data.sort((a, b) => a.centro.localeCompare(b.centro))
+                    .forEach(centro => {
+                        const option = document.createElement('option');
+                        option.value = centro.centro;
+                        option.textContent = `${centro.centro} - ${centro.sociedad}`;
+                        selectCentro.appendChild(option);
+                        console.log('Centro agregado:', centro.centro);
+                    });
+            } else {
+                console.log('No hay centros disponibles');
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No hay centros disponibles';
+                selectCentro.appendChild(option);
+            }
+
+        } catch (error) {
+            console.error('Error en carga de centros:', error);
+            
+            // Mostrar error en el select
+            selectCentro.innerHTML = '';
+            const errorOption = document.createElement('option');
+            errorOption.value = '';
+            errorOption.textContent = 'Error al cargar centros';
+            selectCentro.appendChild(errorOption);
+            
+            // Mostrar alerta al usuario
+            alert('Error al cargar los centros. Verifica la consola para más detalles.');
+            
+        } finally {
+            selectCentro.disabled = false;
+            console.log('Carga de centros finalizada');
+        }
+    }
+
+    // Función para cargar almacenes
+    async function cargarAlmacenes(centro) {
+        console.log('Iniciando carga de almacenes para centro:', centro);
+        
+        try {
+            if (!selectAlmacen) {
+                console.error('selectAlmacen no encontrado en el DOM');
+                return;
+            }
+
+            selectAlmacen.disabled = true;
+            selectAlmacen.innerHTML = '<option value="">Cargando almacenes...</option>';
+            
+            console.log('Haciendo request a web service de almacenes...');
+            
+            const response = await fetch('https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getStore', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    "pais": "ecuador",
+                    "centro": centro.toLowerCase()
+                })
+            });
+
+            console.log('Response recibido:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error en response:', errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            console.log('Datos recibidos:', data);
+
+            // Guarda los datos de almacenes para usar depués
+            datosAlmacenes = data;
+
+            // Poblar el select
+            selectAlmacen.innerHTML = '';
+            
+            if (data && data.length > 0) {
+                console.log(`${data.length} almacenes encontrados`);
+                
+                // Opción por defecto
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- Seleccione un almacén --';
+                selectAlmacen.appendChild(defaultOption);
+                
+                // Ordenar y agregar almacenes
+                data.sort((a, b) => a.mcu.localeCompare(b.mcu))
+                    .forEach(almacen => {
+                        const option = document.createElement('option');
+                        option.value = almacen.mcu;
+                        option.textContent = `${almacen.mcu} - ${almacen.nombre_tienda}`;
+                        option.dataset.nombre = almacen.nombre_tienda;
+                        option.dataset.ceco = almacen.ceco;
+                        selectAlmacen.appendChild(option);
+                        console.log('Almacén agregado:', almacen.mcu);
+                    });
+            } else {
+                console.log('No hay almacenes disponibles para este centro');
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No hay almacenes disponibles';
+                selectAlmacen.appendChild(option);
+            }
+
+        } catch (error) {
+            console.error('Error en carga de almacenes:', error);
+            
+            // Mostrar error en el select
+            selectAlmacen.innerHTML = '';
+            const errorOption = document.createElement('option');
+            errorOption.value = '';
+            errorOption.textContent = 'Error al cargar almacenes';
+            selectAlmacen.appendChild(errorOption);
+            
+            // Mostrar alerta al usuario
+            alert('Error al cargar los almacenes. Verifica la consola para más detalles.');
+            
+        } finally {
+            selectAlmacen.disabled = false;
+            console.log('Carga de almacenes finalizada');
+        }
+    }
+
+    // Función para cargar responsables
+    async function cargarResponsables(mcu) {
+        console.log('Iniciando carga de responsables para almacén:', mcu);
+        
+        try {
+            if (!selectResponsable) {
+                console.error('selectResponsable no encontrado en el DOM');
+                return;
+            }
+
+            selectResponsable.disabled = true;
+            selectResponsable.innerHTML = '<option value="">Cargando responsables...</option>';
+            
+            console.log('Haciendo request a web service de responsables...');
+            
+            const response = await fetch('https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/JefesTienda', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    "mcu": mcu
+                })
+            });
+
+            console.log('Response recibido:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error en response:', errorText);
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            console.log('Datos recibidos de responsables:', data); // ← Debug detallado
+
+            // Poblar el select
+            selectResponsable.innerHTML = '';
+            
+            if (data && data.length > 0) {
+                console.log(`✅ ${data.length} responsables encontrados`);
+                
+                // Opción por defecto
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- Seleccione un responsable --';
+                selectResponsable.appendChild(defaultOption);
+                
+                // Agregar responsables - CORRECCIÓN IMPORTANTE
+                data.forEach(responsable => {
+                    console.log('Datos del responsable:', responsable); // ← Debug de cada responsable
+                    
+                    const option = document.createElement('option');
+                    
+                    // VERIFICAR Y ASIGNAR CORRECTAMENTE EL VALOR
+                    if (responsable.identificacion) {
+                        option.value = responsable.identificacion;
+                    } else if (responsable.cedula) {
+                        option.value = responsable.cedula;
+                    } else if (responsable.id) {
+                        option.value = responsable.id;
+                    } else {
+                        console.warn('Responsable sin identificador válido:', responsable);
+                        option.value = 'sin-identificador';
+                    }
+                    
+                    // ASIGNAR TEXTO VISIBLE
+                    if (responsable.nombre && responsable.apellido) {
+                        option.textContent = `${responsable.nombre} ${responsable.apellido}`;
+                    } else if (responsable.nombre_completo) {
+                        option.textContent = responsable.nombre_completo;
+                    } else if (responsable.nombre) {
+                        option.textContent = responsable.nombre;
+                    } else {
+                        option.textContent = 'Responsable sin nombre';
+                    }
+                    
+                    // Guardar datos adicionales si son necesarios
+                    option.dataset.nombre = responsable.nombre || '';
+                    option.dataset.apellido = responsable.apellido || '';
+                    
+                    selectResponsable.appendChild(option);
+                    console.log('Responsable agregado:', option.value, '-', option.textContent);
+                });
+            } else {
+                console.log('ℹNo hay responsables disponibles para este almacén');
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No hay responsables disponibles';
+                selectResponsable.appendChild(option);
+            }
+
+        } catch (error) {
+            console.error('Error en carga de responsables:', error);
+            
+            // Mostrar error en el select
+            selectResponsable.innerHTML = '';
+            const errorOption = document.createElement('option');
+            errorOption.value = '';
+            errorOption.textContent = 'Error al cargar responsables';
+            selectResponsable.appendChild(errorOption);
+            
+            // Mostrar alerta al usuario
+            alert('Error al cargar los responsables. Verifica la consola para más detalles.');
+            
+        } finally {
+            selectResponsable.disabled = false;
+            console.log('Carga de responsables finalizada');
+        }
+    }
+
+    // Event listener para cambio de país
+    if (selectPais) {
+        selectPais.addEventListener('change', function() {
+            console.log('País seleccionado:', this.value);
+            if (this.value) {
+                selectCentro.disabled = false;
+                cargarCentros(this.value);
+                
+                // Limpiar y deshabilitar almacén y responsable cuando cambia el país
+                selectAlmacen.disabled = true;
+                selectAlmacen.innerHTML = '<option value="">Seleccione primero un centro</option>';
+                
+                selectResponsable.disabled = true;
+                selectResponsable.innerHTML = '<option value="">Seleccione primero un almacén</option>';
+            } else {
+                selectCentro.disabled = true;
+                selectCentro.innerHTML = '<option value="">Seleccione primero un país</option>';
+                
+                selectAlmacen.disabled = true;
+                selectAlmacen.innerHTML = '<option value="">Seleccione primero un centro</option>';
+                
+                selectResponsable.disabled = true;
+                selectResponsable.innerHTML = '<option value="">Seleccione primero un almacén</option>';
+            }
+            inputCentroCosto.value = '';
+        });
+    }
+
+    // Event listener para cambio de centro
+    if (selectCentro) {
+        selectCentro.addEventListener('change', function() {
+            console.log('Centro seleccionado:', this.value);
+            if (this.value) {
+                selectAlmacen.disabled = false;
+                cargarAlmacenes(this.value);
+                
+                // Limpiar y deshabilitar responsable cuando cambia el centro
+                selectResponsable.disabled = true;
+                selectResponsable.innerHTML = '<option value="">Seleccione primero un almacén</option>';
+            } else {
+                selectAlmacen.disabled = true;
+                selectAlmacen.innerHTML = '<option value="">Seleccione primero un centro</option>';
+                
+                selectResponsable.disabled = true;
+                selectResponsable.innerHTML = '<option value="">Seleccione primero un almacén</option>';
+            }
+            inputCentroCosto.value = '';
+        });
+    }
+
+    // Event listener para cambio de almacén
+    if (selectAlmacen) {
+        selectAlmacen.addEventListener('change', function() {
+            console.log('Almacén seleccionado:', this.value);
+            if (this.value) {
+                selectResponsable.disabled = false;
+                console.log('Llamando a cargarResponsables con MCU:', this.value);
+                cargarResponsables(this.value);
+                actualizarCentroCosto(this.value);
+            } else {
+                selectResponsable.disabled = true;
+                selectResponsable.innerHTML = '<option value="">Seleccione primero un almacén</option>';
+                inputCentroCosto.value = '';
+            }
+        });
+    }
+
+    // Iniciar carga de países
+    cargarPaises();
+
+    console.log('Event listeners configurados');
+
+    // Función para actualizar el centro de costo
+    function actualizarCentroCosto(mcuSeleccionado) {
+        console.log('🔄 Actualizando centro de costo para MCU:', mcuSeleccionado);
+        
+        if (!mcuSeleccionado) {
+            inputCentroCosto.value = '';
+            console.log('No hay MCU seleccionado, limpiando centro de costo');
+            return;
+        }
+
+        // Buscar el almacén seleccionado en los datos guardados
+        const almacenSeleccionado = datosAlmacenes.find(almacen => almacen.mcu === mcuSeleccionado);
+        
+        if (almacenSeleccionado && almacenSeleccionado.ceco) {
+            inputCentroCosto.value = almacenSeleccionado.ceco;
+            console.log('Centro de costo actualizado:', almacenSeleccionado.ceco);
+        } else {
+            inputCentroCosto.value = '';
+            console.log('No se encontró ceco para el MCU seleccionado');
+        }
+    }
+    
+    // Inicializar la visibilidad de la tabla
+    actualizarVisibilidadTabla();
+
+    
+    function prepararEnvioFormulario() {
+        // Verificar específicamente el campo responsable
+        const responsableSelect = document.getElementById('responsable');
+        console.log('Valor del select responsable:', responsableSelect.value);
+        console.log('Texto del select responsable:', responsableSelect.options[responsableSelect.selectedIndex]?.textContent);
+        console.log('Opciones disponibles:', Array.from(responsableSelect.options).map(opt => ({value: opt.value, text: opt.textContent})));
+        
+        // Recopilar datos de la cabecera
+        const formData = {
+            'pais': document.getElementById('pais').value,
+            'centro': document.getElementById('centro').value,
+            'almacen': document.getElementById('almacen').value,
+            'responsable': responsableSelect.value, // ← Usar directamente el valor
+            'fecha_inicio': document.getElementById('fecha_inicio').value,
+            'fecha_fin': document.getElementById('fecha_fin').value,
+            'centro_costo': document.getElementById('centro_costo').value,
+            'detalles_articulos': []
+        };
+        
+        // Recopilar datos de la tabla de artículos
+        const filas = document.querySelectorAll('#tablaArticulos tbody tr');
+        filas.forEach(fila => {
+            const celdas = fila.querySelectorAll('td');
+            formData.detalles_articulos.push({
+                'grupo_articulos': celdas[0].textContent !== '-' ? celdas[0].textContent.trim() : '',
+                'linea': celdas[1].textContent !== '-' ? celdas[1].textContent.trim() : '',
+                'marca': celdas[2].textContent !== '-' ? celdas[2].textContent.trim() : '',
+                'observaciones': celdas[3].textContent !== '-' ? celdas[3].textContent.trim() : ''
+            });
+        });
+        
+        console.log('Datos a enviar:', formData);
+        return formData;
+    }
+    
+    // Función para validar fechas con el web service
+    async function validarFechasConteo(ceco, fechaDesde, fechaHasta) {
+        console.log('Validando fechas con web service...');
+        console.log('Datos de validación:', { ceco, fechaDesde, fechaHasta });
+        
+        try {
+            const response = await fetch('https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/verificaFcInventario', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    "ceco": ceco,
+                    "fcDesde": fechaDesde,
+                    "fcHasta": fechaHasta
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Error HTTP: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('Respuesta validación fechas:', data);
+            
+            return data;
+
+        } catch (error) {
+            console.error('Error en validación de fechas:', error);
+            throw error;
+        }
+    }
+
+    // Función para formatear fecha de YYYY-MM-DD a DD/MM/YYYY
+    function formatearFechaParaWS(fechaISO) {
+        const [year, month, day] = fechaISO.split('-');
+        return `${day}/${month}/${year}`;
+    }
+    // Modificar el event listener del formulario 
+    // Modificar el event listener del formulario para incluir validación de fechas
+    document.getElementById('formPlanificacion').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        // Validar que hay artículos agregados
+        if (tablaArticulos.rows.length === 0) {
+            alert('Debe agregar al menos un artículo antes de guardar el conteo.');
+            return;
+        }
+        
+        // Validar campos obligatorios
+        const camposObligatorios = ['pais', 'centro', 'almacen', 'responsable', 'fecha_inicio', 'fecha_fin'];
+        for (const campo of camposObligatorios) {
+            const elemento = document.getElementById(campo);
+            if (!elemento.value.trim()) {
+                alert(`El campo ${elemento.previousElementSibling.textContent} es obligatorio.`);
+                elemento.focus();
+                return;
+            }
+        }
+        
+        // Verificar específicamente el campo responsable
+        const responsableSelect = document.getElementById('responsable');
+        if (!responsableSelect.value) {
+            alert('Debe seleccionar un responsable.');
+            responsableSelect.focus();
+            return;
+        }
+        
+        // Validar que fecha inicio no sea mayor que fecha fin
+        const fechaInicio = document.getElementById('fecha_inicio').value;
+        const fechaFin = document.getElementById('fecha_fin').value;
+        const centroCosto = document.getElementById('centro_costo').value;
+        
+        if (fechaInicio > fechaFin) {
+            alert('La fecha de inicio no puede ser mayor que la fecha de fin.');
+            document.getElementById('fecha_inicio').focus();
+            return;
+        }
+        
+        // Mostrar loading
+        const btnGuardar = this.querySelector('button[type="submit"]');
+        const textoOriginal = btnGuardar.innerHTML;
+        btnGuardar.innerHTML = 'Validando fechas...';
+        btnGuardar.disabled = true;
+        
+        try {
+            // 1. PRIMERO VALIDAR LAS FECHAS CON EL WEB SERVICE
+            console.log('Iniciando validación de fechas...');
+            
+            const fechaDesdeFormateada = formatearFechaParaWS(fechaInicio);
+            const fechaHastaFormateada = formatearFechaParaWS(fechaFin);
+            
+            const resultadoValidacion = await validarFechasConteo(centroCosto, fechaDesdeFormateada, fechaHastaFormateada);
+            
+            // Verificar la respuesta del web service
+            if (resultadoValidacion && resultadoValidacion.length > 0) {
+                const respuesta = resultadoValidacion[0].respuesta;
+                console.log('Resultado validación:', respuesta);
+                // Eliminar la restricción: permitir agregar aunque esté dentro del rango
+                // if (respuesta === 'DENTRO_DEL_RANGO') {
+                //     alert('No se puede crear el conteo. Las fechas seleccionadas ya se encuentran dentro de un rango de conteo existente.');
+                //     btnGuardar.innerHTML = textoOriginal;
+                //     btnGuardar.disabled = false;
+                //     return;
+                // }
+                if (respuesta.includes('ERROR:')) {
+                    alert(`Error en las fechas: ${respuesta}`);
+                    btnGuardar.innerHTML = textoOriginal;
+                    btnGuardar.disabled = false;
+                    return;
+                } else if (respuesta !== 'FUERA_DEL_RANGO' && respuesta !== 'DENTRO_DEL_RANGO') {
+                    alert(`Respuesta inesperada del servidor: ${respuesta}`);
+                    btnGuardar.innerHTML = textoOriginal;
+                    btnGuardar.disabled = false;
+                    return;
+                }
+                // Si llegamos aquí, se permite continuar
+            } else {
+                alert('Error: No se recibió respuesta del servicio de validación de fechas.');
+                btnGuardar.innerHTML = textoOriginal;
+                btnGuardar.disabled = false;
+                return;
+            }
+            
+            // 2. SI LA VALIDACIÓN ES EXITOSA, PROCEDER CON EL GUARDADO
+            btnGuardar.innerHTML = 'Guardando...';
+            
+            // Preparar datos para enviar
+            const datos = prepararEnvioFormulario();
+            
+            const response = await fetch('{% url "guardar_conteo" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify(datos)
+            });
+            
+            const resultado = await response.json();
+            
+            if (resultado.success) {
+                alert('Conteo guardado exitosamente!');
+                
+                // Redirigir a administración de conteos después de guardar
+                if (resultado.redirect_url) {
+                    window.location.href = resultado.redirect_url;
+                } else {
+                    window.location.href = '{% url "administracion_conteo" %}';
+                }
+            } else {
+                let mensajeError = 'Error al guardar: ' + resultado.message;
+                if (resultado.errors) {
+                    mensajeError += '\n' + resultado.errors.join('\n');
+                }
+                alert(mensajeError);
+            }
+            
+        } catch (error) {
+            console.error('Error:', error);
+            if (error.message.includes('Failed to fetch')) {
+                alert('Error de conexión con el servicio de validación. Verifique su conexión a internet.');
+            } else {
+                alert('Error al validar las fechas: ' + error.message);
+            }
+        } finally {
+            // Restaurar botón
+            btnGuardar.innerHTML = textoOriginal;
+            btnGuardar.disabled = false;
+        }
+    });
+    
+});
+</script>
+
+<style>
+/* ========== ESTILOS BASE ========== */
+.form-section {
+    margin-bottom: 15px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 3px solid #052F62;
+}
+
+.form-section h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: #333;
+    font-size: 14px;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.form-group label {
+    font-weight: 500;
+    margin-bottom: 3px;
+    color: #333;
+    font-size: 11px;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    padding: 5px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 11px;
+    height: 30px;
+}
+
+.readonly-field {
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    color: #6c757d;
+    cursor: not-allowed;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: #052F62;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e9ecef;
+}
+
+.btn {
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    font-size: 11px;
+    height: 32px;
+}
+
+.btn-primary {
+    background: #052F62;
+    color: white;
+    width: auto;
+    min-width: 100px;
+    justify-content: center
+}
+
+.btn-primary:hover {
+    background: #031B38;
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: #950404;
+    color: white;
+    width: auto;
+    min-width: 100px;
+    justify-content: center
+}
+
+.btn-secondary:hover {
+    background: #700202ff;
+    transform: translateY(-1px);
+}
+
+.btn-success {
+    background: #052F62;
+    color: white;
+    width: auto;
+    min-width: 120px;
+}
+
+.btn-success:hover {
+    background: #031B38;
+    transform: translateY(-1px);
+}
+
+.btn-danger {
+    background: #950404;
+    color: white;
+    padding: 3px 6px;
+    font-size: 9px;
+    min-width: unset;
+    width: auto;
+    border-radius: 3px;
+    height: 22px;
+}
+
+.btn-danger:hover{
+    background: #740400;
+    transform: translateY(-1px);
+}
+
+/* ========== ESTILOS PARA TABLAS ========== */
+.tabla-articulos-container {
+    margin-top: 12px;
+}
+
+.tabla-articulos-container h4 {
+    margin-bottom: 6px;
+    color: #333;
+    font-size: 13px;
+}
+
+.tabla-articulos {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10px;
+    font-size: 10px;
+    display: none;
+}
+
+.tabla-articulos th,
+.tabla-articulos td {
+    padding: 5px 6px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+    line-height: 1.2;
+}
+
+.tabla-articulos th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    font-size: 10px;
+    padding: 6px 6px;
+}
+
+.tabla-articulos tr:hover {
+    background-color: #f5f5f5;
+}
+
+.mensaje-tabla-vacia {
+    text-align: center;
+    padding: 12px;
+    color: #6c757d;
+    font-style: italic;
+    display: block;
+    font-size: 11px;
+}
+
+/* ========== SELECT2 PERSONALIZADO ========== */
+.select2-container {
+    z-index: 1000;
+}
+
+.select2-container--default .select2-selection--single {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    height: 30px;
+    font-size: 11px;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 28px;
+    font-size: 11px;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 28px;
+}
+
+/* ========== MEDIA QUERY ESPECÍFICA PARA 1024x768 ========== */
+@media screen and (max-width: 1024px) and (max-height: 768px) {
+    /* Ajustes generales para pantalla pequeña */
+    body {
+        font-size: 11px;
+        overflow-x: hidden;
+    }
+
+    /* Contenido principal más compacto */
+    .main-content {
+        padding: 10px;
+        margin-top: 20px;
+    }
+
+    .content-header {
+        padding: 12px;
+        margin-bottom: 12px;
+    }
+
+    .content-header h1 {
+        font-size: 18px;
+    }
+
+    .content-header p {
+        font-size: 11px;
+    }
+
+    /* Cards más compactos */
+    .card {
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 6px;
+    }
+
+    .card h2, .card h3 {
+        font-size: 14px;
+        margin-bottom: 8px;
+    }
+
+    /* Formularios más compactos */
+    .form-section {
+        padding: 10px;
+        margin-bottom: 12px;
+    }
+
+    .form-row {
+        gap: 6px;
+        margin-bottom: 6px;
+    }
+
+    .form-group {
+        min-width: 80px;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        padding: 4px 6px;
+        font-size: 10px;
+        height: 28px;
+    }
+
+    .form-group label {
+        font-size: 9px;
+    }
+
+    /* Textarea más compacto */
+    .form-group textarea {
+        height: 40px;
+        resize: vertical;
+    }
+
+    /* Botones más pequeños */
+    .btn {
+        font-size: 10px;
+        height: 28px;
+    }
+
+    .btn-success {
+        min-width: 110px;
+    }
+
+    /* Tablas ultra compactas */
+    .tabla-articulos {
+        font-size: 9px;
+    }
+
+    .tabla-articulos th,
+    .tabla-articulos td {
+        padding: 4px 5px;
+    }
+
+    .tabla-articulos th {
+        font-size: 9px;
+        padding: 5px 5px;
+    }
+
+    /* Botones de eliminar más compactos */
+    .btn-danger {
+        padding: 2px 4px;
+        font-size: 8px;
+        height: 20px;
+    }
+
+    /* Mensajes más compactos */
+    .mensaje-tabla-vacia {
+        padding: 10px;
+        font-size: 10px;
+    }
+
+    /* Select2 más compacto */
+    .select2-container--default .select2-selection--single {
+        height: 28px;
+        font-size: 10px;
+    }
+
+    .select2-container--default .select2-selection--single .select2-selection__rendered {
+        line-height: 26px;
+        font-size: 10px;
+    }
+
+    .select2-container--default .select2-selection--single .select2-selection__arrow {
+        height: 26px;
+    }
+
+    /* Asegurar que no haya scroll horizontal */
+    .table-responsive {
+        overflow-x: auto;
+        max-width: 100%;
+    }
+
+    /* Botones de acción en formularios */
+    .form-actions {
+        margin-top: 10px;
+        padding-top: 10px;
+    }
+}
+
+/* ========== AJUSTES ESPECÍFICOS PARA ALTURA 768px ========== */
+@media screen and (max-width: 1024px) and (max-height: 768px) and (min-width: 769px) {
+    /* Optimizar espacio vertical */
+    .main-content {
+        min-height: calc(100vh - 60px);
+    }
+
+    /* Compactar aún más los elementos */
+    .card {
+        padding: 8px;
+    }
+
+    .form-section {
+        padding: 8px;
+        margin-bottom: 10px;
+    }
+
+    .form-row {
+        gap: 4px;
+    }
+
+    .tabla-articulos {
+        font-size: 8px;
+    }
+
+    .tabla-articulos th,
+    .tabla-articulos td {
+        padding: 3px 4px;
+    }
+
+    /* Reducir aún más los botones */
+    .btn {
+        font-size: 9px;
+        height: 26px;
+    }
+
+    .btn-success {
+        min-width: 100px;
+    }
+}
+
+/* ========== RESPONSIVE DESIGN PARA MÓVILES ========== */
+@media (max-width: 768px) {
+    .form-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .form-group {
+        min-width: 100%;
+    }
+
+    .form-actions {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .btn-primary,
+    .btn-secondary,
+    .btn-success {
+        min-width: 100%;
+    }
+
+    .tabla-articulos-container {
+        overflow-x: auto;
+    }
+
+    .tabla-articulos {
+        min-width: 600px;
+        font-size: 10px;
+    }
+
+    /* Modales en móviles */
+    .modal > div {
+        margin: 2% auto;
+        width: 98%;
+        padding: 12px;
+    }
+
+    /* Cards en móviles */
+    .card {
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+
+    /* Select2 en móviles */
+    .select2-container--default .select2-selection--single {
+        font-size: 14px;
+        height: 40px;
+    }
+
+    .select2-container--default .select2-selection--single .select2-selection__rendered {
+        line-height: 38px;
+        font-size: 14px;
+    }
+}
+
+/* ========== AJUSTES ESPECÍFICOS PARA MÓVILES PEQUEÑOS ========== */
+@media (max-width: 480px) {
+    .main-content {
+        padding: 8px;
+    }
+
+    .content-header {
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+
+    .content-header h1 {
+        font-size: 16px;
+    }
+
+    .content-header p {
+        font-size: 10px;
+    }
+
+    .card {
+        padding: 8px;
+    }
+
+    .tabla-articulos {
+        min-width: 500px;
+        font-size: 9px;
+    }
+
+    .btn {
+        font-size: 10px;
+        height: 26px;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        padding: 3px 5px;
+        font-size: 10px;
+        height: 26px;
+    }
+
+    .form-group textarea {
+        height: 40px;
+    }
+}
+
+/* ========== UTILIDADES ========== */
+.text-center {
+    text-align: center;
+}
+
+.text-muted {
+    color: #666;
+}
+
+.mb-0 {
+    margin-bottom: 0;
+}
+
+.mt-20 {
+    margin-top: 20px;
+}
+
+.p-20 {
+    padding: 20px;
+}
+
+.d-none {
+    display: none;
+}
+
+.d-block {
+    display: block;
+}
+
+.d-flex {
+    display: flex;
+}
+
+.justify-center {
+    justify-content: center;
+}
+
+.align-center {
+    align-items: center;
+}
+
+.gap-10 {
+    gap: 10px;
+}
+
+.w-100 {
+    width: 100%;
+}
+
+.h-100 {
+    height: 100%;
+}
+
+/* ========== HOVER EFFECTS ========== */
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.tabla-articulos tbody tr:hover {
+    background: #f8f9fa !important;
+}
+
+/* ========== ACCESIBILIDAD ========== */
+.btn:focus,
+.form-control:focus,
+.close:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+}
+
+/* ========== ESTILOS PARA CAMPOS DESHABILITADOS ========== */
+.form-group select:disabled {
+    background-color: #f8f9fa;
+    color: #6c757d;
+    cursor: not-allowed;
+}
+
+/* ========== ANIMACIONES ========== */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideIn {
+    from { 
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to { 
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ========== SCROLL PERSONALIZADO ========== */
+.tabla-articulos-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.tabla-articulos-container::-webkit-scrollbar-thumb {
+    background: #052F62;
+    border-radius: 3px;
+}
+
+.tabla-articulos-container::-webkit-scrollbar-thumb:hover {
+    background: #031B38;
+}
+
+/* ========== ESTILOS ESPECÍFICOS PARA EL FORMULARIO ========== */
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.form-group[style*="grid-column"] {
+    grid-column: 1 / span 2;
+}
+
+/* Ajustes específicos para la resolución 1024x768 */
+@media screen and (max-width: 1024px) and (max-height: 768px) {
+    .form-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    
+    .form-group[style*="grid-column"] {
+        grid-column: 1 / span 2;
+    }
+    
+    /* Asegurar que los elementos del formulario quepan en pantalla */
+    .form-group {
+        min-width: 0;
+    }
+    
+    /* Ajustar el textarea de observaciones */
+    .form-group textarea {
+        min-height: 35px;
+        max-height: 60px;
+    }
+    
+    /* Mejorar la legibilidad de la tabla */
+    .tabla-articulos td {
+        word-break: break-word;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+/* Ajustes adicionales para pantallas muy pequeñas */
+@media screen and (max-width: 1024px) and (max-height: 768px) and (max-width: 900px) {
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .form-group[style*="grid-column"] {
+        grid-column: 1;
+    }
+}
+</style>
+
+{% endblock %}

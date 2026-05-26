@@ -1,0 +1,996 @@
+/* Estilos generales */
+/* Estilos generales */
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 12px;
+    background-color: #f4f4f4;
+    margin: 0;
+    padding: 0;
+    /* SCROLL EXTERNO EN BODY */
+    overflow-y: auto;
+}
+
+h1, h2, h4, h5, h6 {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0;
+}
+
+/* Franja superior azul con logo - CORREGIDA */
+.header-strip {
+    background-color: #052F62;
+    width: 100%;
+    padding: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    margin-bottom: 10px;
+}
+
+.header-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.login-logo {
+    height: 50px;
+}
+
+/* Estilos para login */
+.login-container {
+    max-width: 400px;
+    margin: 60px auto;
+    padding: 30px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+}
+
+.login-container h2 {
+    text-align: center;
+    color: #052F62;
+    margin-bottom: 6px;
+}
+
+.login-version {
+    display: block;
+    text-align: center;
+    color: #052F62;
+    font-weight: bold;
+    margin-bottom: 25px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+    color: #333;
+}
+
+input[type="text"],
+input[type="password"] {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 16px;
+    box-sizing: border-box;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus {
+    border-color: #052F62;
+    outline: none;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background-color: #052F62;
+    /* Color azul correcto */
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #031B38;
+}
+
+/* Estilos para mensajes de alerta */
+.alert {
+    padding: 12px;
+    margin-bottom: 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    text-align: center;
+}
+
+.alert-error {
+    background-color: #d6d6d6;
+    color: #721c24;
+    border: 1px solid #77000c;
+}
+
+/* Estilos para el modal */
+.modal {
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: none;
+}
+
+.modal-visible {
+    display: block;
+}
+
+.modal-content {
+    background-color: white;
+    margin: 10% auto;
+    padding: 30px;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+    position: relative;
+}
+
+.modal-content h3 {
+    margin-top: 0;
+    color: #333;
+    border-bottom: 2px solid #052F62;
+    padding-bottom: 10px;
+}
+
+/* Estilos para selección de perfiles */
+.perfiles-list {
+    margin: 25px 0;
+}
+
+.perfil-item {
+    margin: 15px 0;
+    padding: 15px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.perfil-item:hover {
+    border-color: #052F62;
+    background-color: #f8f9fa;
+    transform: translateY(-2px);
+}
+
+.perfil-item input[type="radio"] {
+    margin-right: 12px;
+    transform: scale(1.2);
+}
+
+.perfil-item label {
+    font-size: 16px;
+    cursor: pointer;
+    margin: 0;
+    font-weight: normal;
+    color: #495057;
+}
+
+.btn-continuar {
+    width: 100%;
+    padding: 14px;
+    background-color: #052F62;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    margin-top: 25px;
+    transition: background-color 0.3s;
+}
+
+.btn-continuar:hover {
+    background-color: #031B38;
+    transform: translateY(-1px);
+}
+
+/* ========== DASHBOARD STYLES ========== */
+.dashboard-container {
+    display: flex;
+    min-height: 100vh;
+    position: relative;
+    /* SIN SCROLL INTERNO - SCROLL EXTERNO EN BODY */
+    overflow: visible;
+}
+
+/* ========== MENÚ LATERAL ========== */
+.sidebar {
+    width: 250px;
+    background: #052F62;
+    color: white;
+    position: fixed;
+    height: 100vh;
+    left: 0;
+    top: 0;
+    z-index: 1000;
+    transition: transform 0.3s ease-in-out;
+    transform: translateX(0);
+    /* SCROLL INDEPENDIENTE PARA SIDEBAR */
+    overflow-y: auto;
+}
+
+.sidebar-header {
+    padding: 20px;
+    background: #052F62;
+    border-bottom: 1px solid #e4e4e4;
+}
+
+.sidebar-header h3 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+}
+
+.sidebar-header p {
+    margin: 5px 0;
+    font-size: 14px;
+}
+
+.sidebar-header small {
+    color: #ecf0f1;
+    font-size: 12px;
+}
+
+.sidebar-menu {
+    padding: 20px 0;
+}
+
+.sidebar-menu ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.menu-item {
+    margin: 5px 0;
+}
+
+.menu-item a {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    color: #ecf0f1;
+    text-decoration: none;
+    transition: background 0.3s;
+}
+
+.menu-item a:hover {
+    background: #031B38;
+}
+
+.menu-item .icon {
+    margin-right: 10px;
+    font-size: 18px;
+}
+
+.sidebar-footer {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    padding: 20px;
+    border-top: 1px solid #e4e4e4;
+}
+
+.logout-btn {
+    display: flex;
+    align-items: center;
+    color: #ffffff;
+    text-decoration: none;
+}
+
+.logout-btn:hover {
+    color: #d4d4d4;
+}
+
+/* ========== BOTÓN HAMBURGUESA ========== */
+.menu-toggle {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 1001;
+    background: #052F62;
+    border-radius: 5px;
+    padding: 8px;
+    border: none;
+}
+
+.menu-toggle span {
+    width: 25px;
+    height: 3px;
+    background: white;
+    margin: 3px 0;
+    transition: 0.3s;
+    display: block;
+}
+
+/* Animación del botón hamburguesa */
+.menu-toggle.active span:nth-child(1) {
+    transform: rotate(-45deg) translate(-5px, 6px);
+}
+
+.menu-toggle.active span:nth-child(2) {
+    opacity: 0;
+}
+
+.menu-toggle.active span:nth-child(3) {
+    transform: rotate(45deg) translate(-5px, -6px);
+}
+
+/* ========== OVERLAY PARA MÓVILES ========== */
+.menu-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.menu-overlay.active {
+    display: block;
+    opacity: 1;
+}
+
+/* ========== CONTENIDO PRINCIPAL ========== */
+.main-content {
+    flex: 1;
+    margin-left: 200px;
+    margin-top: 40px;
+    padding: 25px;
+    background: #f8f9fa;
+    min-height: 100vh;
+    transition: margin-left 0.3s ease;
+    width: calc(100vw - 600px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-sizing: border-box;
+    position: relative;
+    /* SIN SCROLL INTERNO - SCROLL EXTERNO EN BODY */
+    overflow-y: visible;
+    height: auto;
+}
+
+.content-header {
+    background: linear-gradient(135deg, #052F62 0%, #031B38 100%);
+    color: white;
+    padding: 25px;
+    border-radius: 10px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.content-header h1 {
+    margin: 0;
+    font-size: 28px;
+}
+
+.content-header p {
+    margin: 10px 0 0 0;
+    opacity: 0.9;
+}
+
+.content-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 2fr));
+    gap: 20px;
+}
+
+.card {
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+    border-left: 4px solid #052F62;
+}
+
+.card h2 {
+    color: #2c3e50;
+    margin-top: 0;
+    border-bottom: 4px solid #a3a3a3;
+    padding-bottom: 10px;
+}
+
+/* Prevenir scroll cuando el menú está abierto */
+body.no-scroll {
+    overflow: hidden;
+}
+
+/* Estilos para estadísticas rápidas */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.stat-card {
+    background: #e4e4e4;
+    padding: 15px;
+    border-radius: 8px;
+    text-align: center;
+    border-left: 4px solid #052F62;
+}
+
+.stat-card h3 {
+    margin: 0;
+    color: #052F62;
+    font-size: 24px;
+}
+
+.stat-card small {
+    color: #546e7a;
+    font-size: 12px;
+}
+
+/* Efectos de hover para cards */
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    transition: all 0.3s ease;
+}
+
+/* Scroll personalizado para sidebar */
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: #34495e;
+    border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: #2c3e50;
+}
+
+/* ========== ESTILOS ADICIONALES PARA EL DASHBOARD ========== */
+.user-info p {
+    margin: 8px 0;
+    padding: 5px 0;
+}
+
+.user-info p:last-child {
+    border-bottom: none;
+}
+
+.modules-list {
+    list-style: none;
+    padding: 0;
+}
+
+.modules-list li {
+    padding: 8px 0;
+}
+
+.modules-list li:last-child {
+    border-bottom: none;
+}
+
+.quick-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 15px;
+    background: #f8f9fa;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.action-btn:hover {
+    background: #031B38;
+    color: white;
+    transform: translateY(-2px);
+}
+
+.action-icon {
+    font-size: 24px;
+    margin-bottom: 5px;
+}
+
+.system-status {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 6px;
+}
+
+.status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-indicator.online {
+    background: #28A745;
+}
+
+.status-indicator.developing {
+    background: #E3B10B;
+}
+
+.status-indicator.offline {
+    background: #950404;
+}
+
+/* Estilos para el debug visual */
+#debugWidth,
+#debugMenuState,
+#debugTransform,
+#debugVisible {
+    font-weight: bold;
+    color: #00ff00;
+}
+
+/* Estilos para selects y loading */
+select {
+    background-color: white;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23333'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+    padding-right: 35px;
+}
+
+select:disabled {
+    background-color: #f8f9fa;
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+/* Estilos para opciones del dropdown */
+option {
+    padding: 8px;
+}
+
+/* Indicador de carga */
+.loading {
+    position: relative;
+}
+
+.loading::after {
+    content: '';
+    position: absolute;
+    right: 30px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: translateY(-50%) rotate(0deg); }
+    100% { transform: translateY(-50%) rotate(360deg); }
+}
+
+/* Estilos para selects dependientes */
+select:disabled {
+    background-color: #f8f9fa;
+    color: #6c757d;
+    cursor: not-allowed;
+}
+
+/* Indicador de carga para selects */
+.loading-select {
+    position: relative;
+    background-image: none !important;
+}
+
+.loading-select::after {
+    content: '';
+    position: absolute;
+    right: 30px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Mejorar la visualización de las opciones */
+option {
+    padding: 10px;
+    font-size: 14px;
+}
+
+/* Grupo de campos relacionados */
+.field-group {
+    margin-bottom: 20px;
+}
+
+.field-group h4 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+@keyframes spin {
+    0% { transform: translateY(-50%) rotate(0deg); }
+    100% { transform: translateY(-50%) rotate(360deg); }
+}
+
+/* ========== MEDIA QUERY PARA 1024x768 ========== */
+@media screen and (max-width: 1024px) and (max-height: 768px) {
+    
+    /* Ajustes generales para pantalla pequeña */
+    body {
+        font-size: 11px;
+        overflow-x: hidden;
+        /* SCROLL EXTERNO EN BODY */
+        overflow-y: auto;
+    }
+
+    h1, h2, h4, h5, h6 {
+        font-size: 13px;
+    }
+
+    /* Header más compacto */
+    .header-strip {
+        padding: 8px 0;
+        margin-bottom: 8px;
+    }
+
+    .header-content {
+        padding: 8px 15px;
+    }
+
+    .login-logo {
+        height: 40px;
+    }
+
+    /* Login más compacto */
+    .login-container {
+        max-width: 350px;
+        margin: 30px auto;
+        padding: 20px;
+    }
+
+    .login-container h2 {
+        margin-bottom: 20px;
+        font-size: 18px;
+    }
+
+    .form-group {
+        margin-bottom: 15px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    button {
+        padding: 10px;
+        font-size: 14px;
+    }
+
+    /* Dashboard compacto */
+    .dashboard-container {
+        min-height: calc(100vh - 60px);
+        /* SIN SCROLL INTERNO */
+        overflow: visible;
+    }
+
+    /* Sidebar más estrecho */
+    .sidebar {
+        width: 200px;
+        /* SCROLL INDEPENDIENTE */
+        overflow-y: auto;
+    }
+
+    .sidebar-header {
+        padding: 15px;
+    }
+
+    .sidebar-header h3 {
+        font-size: 16px;
+        margin-bottom: 8px;
+    }
+
+    .sidebar-header p {
+        font-size: 12px;
+        margin: 3px 0;
+    }
+
+    .sidebar-menu {
+        padding: 15px 0;
+    }
+
+    .menu-item a {
+        padding: 10px 15px;
+        font-size: 12px;
+    }
+
+    .menu-item .icon {
+        font-size: 16px;
+        margin-right: 8px;
+    }
+
+    /* Contenido principal ajustado - SIN SCROLL INTERNO */
+    .main-content {
+        margin-left: 225px;
+        margin-top: 30px;
+        padding: 15px;
+        width: calc(100vw - 250px);
+        /* SIN SCROLL INTERNO - SCROLL EXTERNO EN BODY */
+        overflow-y: visible;
+        height: auto;
+    }
+
+    .content-header {
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+
+    .content-header h1 {
+        font-size: 22px;
+    }
+
+    .content-header p {
+        font-size: 13px;
+        margin-top: 8px;
+    }
+
+    /* Grid más compacto */
+    .content-body {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 15px;
+    }
+
+    .card {
+        padding: 20px;
+        margin-bottom: 15px;
+    }
+
+    .card h2 {
+        font-size: 16px;
+        padding-bottom: 8px;
+    }
+
+    /* Estadísticas más compactas */
+    .stats-grid {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
+        margin-top: 12px;
+    }
+
+    .stat-card {
+        padding: 10px;
+    }
+
+    .stat-card h3 {
+        font-size: 15px;
+    }
+
+    .stat-card small {
+        font-size: 10px;
+    }
+
+    /* Quick actions más pequeños */
+    .quick-actions {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+    }
+
+    .action-btn {
+        padding: 12px;
+    }
+
+    .action-icon {
+        font-size: 20px;
+        margin-bottom: 4px;
+    }
+
+    /* Modal más compacto */
+    .modal-content {
+        margin: 5% auto;
+        padding: 20px;
+        max-width: 450px;
+    }
+
+    .perfiles-list {
+        margin: 20px 0;
+    }
+
+    .perfil-item {
+        margin: 12px 0;
+        padding: 12px;
+    }
+
+    .btn-continuar {
+        padding: 12px;
+        margin-top: 20px;
+        font-size: 14px;
+    }
+
+    /* Ajustes específicos para altura limitada */
+    .sidebar-footer {
+        padding: 15px;
+    }
+
+    .user-info p {
+        margin: 6px 0;
+        padding: 4px 0;
+        font-size: 11px;
+    }
+
+    .modules-list li {
+        padding: 6px 0;
+        font-size: 11px;
+    }
+
+    .system-status {
+        gap: 8px;
+    }
+
+    .status-item {
+        padding: 6px;
+        font-size: 11px;
+    }
+}
+
+/* ========== AJUSTES ESPECÍFICOS PARA ALTURA 768px ========== */
+@media screen and (max-width: 1024px) and (max-height: 768px) and (min-width: 769px) {
+    
+    /* SCROLL EXTERNO EN BODY - SIN SCROLL INTERNO */
+    body, html {
+        height: 100%;
+        overflow-y: auto;
+    }
+
+    .dashboard-container {
+        height: auto;
+        overflow: visible;
+    }
+
+    /* Sidebar de altura completa con scroll independiente */
+    .sidebar {
+        height: 100vh;
+        overflow-y: auto;
+    }
+
+    /* Header más compacto */
+    .header-strip {
+        position: relative;
+        z-index: 1002;
+    }
+
+    /* Login centrado verticalmente */
+    .login-container {
+        margin: 10vh auto;
+    }
+
+    /* Main content SIN scroll interno */
+    .main-content {
+        height: auto;
+        overflow-y: visible;
+    }
+}
+
+/* ========== MANTENER RESPONSIVE EXISTENTE PARA MÓVILES ========== */
+@media screen and (max-width: 768px) {
+    /* Mostrar botón hamburguesa */
+    .menu-toggle {
+        display: flex !important;
+    }
+
+    /* Ocultar sidebar por defecto en móviles */
+    .sidebar {
+        transform: translateX(-100%);
+    }
+
+    /* Mostrar sidebar cuando se abre el menú */
+    .sidebar.menu-open {
+        transform: translateX(0);
+        box-shadow: 2px 0 20px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Ajustar contenido principal en móviles */
+    .main-content {
+        margin-left: 0 !important;
+        padding: 20px;
+        padding-top: 80px;
+        width: 100% !important;
+        /* SIN SCROLL INTERNO - SCROLL EXTERNO EN BODY */
+        overflow-y: visible;
+        height: auto;
+    }
+}
+
+/* ========== AJUSTES ADICIONALES PARA PANTALLAS MUY PEQUEÑAS ========== */
+@media screen and (max-width: 480px) {
+    .sidebar {
+        width: 280px;
+    }
+
+    .menu-toggle {
+        top: 10px;
+        left: 10px;
+    }
+
+    .content-header {
+        padding: 20px;
+    }
+
+    .content-header h1 {
+        font-size: 24px;
+    }
+
+    .card {
+        padding: 10px;
+    }
+
+    .content-body {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* SIN SCROLL INTERNO en móviles pequeños */
+    .main-content {
+        height: auto;
+        overflow-y: visible;
+    }
+}

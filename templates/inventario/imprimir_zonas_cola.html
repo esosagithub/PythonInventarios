@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Cola de impresión</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f5f5f5;
+      font-family: Helvetica, Arial, sans-serif;
+      color: #444;
+    }
+
+    .status-box {
+      background: white;
+      padding: 24px 28px;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      text-align: center;
+      max-width: 360px;
+    }
+
+    .status-box h1 {
+      font-size: 18px;
+      margin: 0 0 12px;
+      color: #052F62;
+    }
+
+    .status-box p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .status-box strong {
+      color: #052F62;
+    }
+
+    iframe {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      width: 1px;
+      height: 1px;
+      border: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="status-box">
+    <h1>Imprimiendo secuencias</h1>
+    <p id="statusText">Preparando {{ total_secuencias }} ticket(s)...</p>
+  </div>
+
+  <iframe id="printFrame" title="Impresión de secuencias"></iframe>
+
+  <script>
+    const secuencialIds = {{ secuencial_ids_json|safe }};
+    const frame = document.getElementById('printFrame');
+    const statusText = document.getElementById('statusText');
+    let currentIndex = 0;
+    let esperandoImpresion = false;
+
+    function actualizarEstado(mensaje) {
+      statusText.textContent = mensaje;
+    }
+
+    function avanzarCola() {
+      if (!esperandoImpresion) {
+        return;
+      }
+
+      esperandoImpresion = false;
+      currentIndex += 1;
+      setTimeout(imprimirSiguiente, 400);
+    }
+
+    function imprimirFrameActual() {
+      const frameWindow = frame.contentWindow;
+
+      if (!frameWindow) {
+        actualizarEstado('No fue posible preparar la impresión.');
+        return;
+      }
+
+      esperandoImpresion = true;
+
+      frameWindow.onafterprint = avanzarCola;
+
+      try {
+        frameWindow.focus();
+        frameWindow.print();
+      } catch (error) {
+        console.error('Error lanzando impresión:', error);
+        actualizarEstado('Ocurrió un error al iniciar la impresión.');
+      }
+
+      setTimeout(avanzarCola, 3000);
+    }
+
+    function imprimirSiguiente() {
+      if (!Array.isArray(secuencialIds) || secuencialIds.length === 0) {
+        actualizarEstado('No hay secuencias pendientes por imprimir.');
+        setTimeout(function () { window.close(); }, 1200);
+        return;
+      }
+
+      if (currentIndex >= secuencialIds.length) {
+        actualizarEstado('Impresión completada. Puede cerrar esta ventana.');
+        setTimeout(function () { window.close(); }, 1200);
+        return;
+      }
+
+      const secuencialId = secuencialIds[currentIndex];
+      actualizarEstado(`Imprimiendo ticket ${currentIndex + 1} de ${secuencialIds.length}...`);
+      frame.src = `/imprimir-zona-secuencia/${secuencialId}/?queue=1`;
+    }
+
+    frame.addEventListener('load', function () {
+      setTimeout(imprimirFrameActual, 900);
+    });
+
+    imprimirSiguiente();
+  </script>
+</body>
+</html>

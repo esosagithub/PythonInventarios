@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Imprimiendo etiquetas...</title>
+  <style>
+    /* ── Pantalla: mensaje de espera centrado ── */
+    @media screen {
+      body { font-family: Helvetica, sans-serif; display: flex;
+             align-items: center; justify-content: center;
+             height: 100vh; margin: 0; background: #f5f5f5; }
+      .screen-msg { text-align: center; color: #555; font-size: 14pt; }
+      .ticket-wrap { display: none; }
+    }
+
+    /* ── Impresión: solo las etiquetas, sin mensaje de espera ── */
+    @media print {
+      @page { size: 80mm auto; margin: 3mm 4mm 6mm 4mm; }
+      .screen-msg { display: none; }
+      .ticket-wrap { display: block; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+
+    /* ── Estilos compartidos de la etiqueta ── */
+    .ticket-wrap {
+      width: 72mm;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      break-after: page;
+      page-break-after: always;
+    }
+    .ticket-wrap:last-child {
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+    .row { margin-bottom: 2.5mm; line-height: 1.3; }
+    .lbl-bold { font-weight: 700; font-size: 14px; }
+    .line-row { display: flex; align-items: flex-end; gap: 3px; margin-bottom: 3mm; }
+    .line-label { min-width: 32mm; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .underline { display: block; border-bottom: 1px solid #000; flex: 1; height: 11px; }
+    .bc-wrap { text-align: center; margin-top: 4mm; width: 100%; overflow: visible; }
+    .bc-wrap svg { display: block; width: 100%; max-width: 100%; height: auto; margin: 0 auto !important; }
+    .bc-text { font-size: 11px; font-weight: 700; text-align: center; margin-top: 2mm;
+               letter-spacing: 0.5px; word-break: break-all; }
+  </style>
+</head>
+<body>
+
+  <div class="screen-msg">
+    <div>Preparando impresión...</div>
+    <div style="font-size:11pt;color:#888;margin-top:10px;">
+      {% if queue_mode and queue_progress_text %}
+      {{ queue_progress_text }}
+      {% else %}
+      {{ secuenciales|length }} etiqueta{{ secuenciales|length|pluralize:"s" }}
+      {% endif %}
+    </div>
+  </div>
+
+  {% for seq in secuenciales %}
+  <div class="ticket-wrap">
+    <div class="row"><span class="lbl-bold">Ubicación: {{ seq.ubicacion }}</span></div>
+    <div class="row"><span class="lbl-bold">Secuencia: {{ seq.secuencia }}</span></div>
+    <div class="line-row"><span class="line-label">Total conteo:</span><span class="underline"></span></div>
+    <div class="line-row"><span class="line-label">Total recibidos:</span><span class="underline"></span></div>
+    <div class="line-row"><span class="line-label">Resp. conteo:</span><span class="underline"></span></div>
+    <div class="bc-wrap">{{ seq.barcode_svg|safe }}</div>
+    <div class="bc-text">{{ seq.codigo }}</div>
+  </div>
+  {% endfor %}
+
+<script>
+  const queueMode = {{ queue_mode|yesno:"true,false" }};
+  const queueNextUrl = "{{ queue_next_url|escapejs }}";
+
+  // Esperar 900ms para que los SVGs rendericen antes de abrir el diálogo
+  setTimeout(function () {
+    window.addEventListener('afterprint', function () {
+      if (queueMode && queueNextUrl) {
+        window.location.replace(queueNextUrl);
+        return;
+      }
+
+      setTimeout(function () { window.close(); }, 1000);
+    }, { once: true });
+
+    window.focus();
+    window.print();
+  }, 900);
+</script>
+</body>
+</html>

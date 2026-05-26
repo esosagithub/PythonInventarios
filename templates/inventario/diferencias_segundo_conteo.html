@@ -1,0 +1,1935 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Menú Hamburguesa -->
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+ 
+    <!-- Overlay para menú móvil -->
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Indicador de Carga Global -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Cargando...</p>
+        </div>
+    </div>
+    
+    <!-- Menú Lateral -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+        
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Contenido Principal -->
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Diferencias - Segundo Conteo</h1>
+            <p>Asignación de colaboradores para revisión de diferencias</p>
+        </div>
+
+        <!-- Datos principales del conteo -->
+        <div class="card card-conteo-info">
+            <h3>Información del Conteo</h3>
+            <div class="form-row conteo-info-grid">
+                <div class="form-group">
+                    <label>Número del Conteo:</label>
+                    <input type="text" value="{{ conteo.numero_conteo }}" readonly class="readonly-field">
+                </div>
+                <div class="form-group">
+                    <label>Centro:</label>
+                    <input type="text" value="{{ conteo.centro }}" readonly class="readonly-field">
+                </div>
+                <div class="form-group">
+                    <label>Almacén:</label>
+                    <input type="text" value="{{ conteo.almacen }}" readonly class="readonly-field">
+                </div>
+                <div class="form-group">
+                    <label>Estado:</label>
+                    <input type="text" value="{{ conteo.estado }}" readonly class="readonly-field">
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tabla de diferencias -->
+        <div class="card">
+            <div class="card-header-with-actions">
+                <div class="header-actions">
+                    <!-- RPRO stats removed as requested -->
+                    <!-- Filtro por colaborador -->
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <label for="filtroColaborador" style="margin:0; font-size:12px; color:#333;">Colaborador:</label>
+                        <select id="filtroColaborador" class="form-control" style="min-width:220px;">
+                            <option value="">-- Todos --</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-redistribuir" type="button" onclick="abrirModalRedistribuir()">
+                        <i class="fas fa-random"></i>
+                        Redistribuir
+                    </button>
+                    <!-- Estadísticas por colaborador -->
+                    <!-- Estadísticas por colaborador (ocultadas aquí por petición) -->
+                </div>
+            </div>
+            
+            <div class="table-responsive">
+                <span class="info-badge">Solo se muestran items con diferencias</span>
+                    
+                <table class="data-table diferencias-table" id="tablaDiferencias">
+                    <thead>
+                        <tr>
+                            <th>Código SAP</th>
+                            <th>Descripción</th>
+                            <th>Marca</th>
+                            <th>Talla</th>
+                            <th>EAN</th>
+                            <th>Grupo Artículos</th>
+                            <th>Ubicación</th>
+                            <th>Conteo Físico</th>
+                            <th>Stock Sistema</th>
+                            <th>Diferencia</th>
+                            <th>Colaborador Asignado</th>
+                            <th>PROCESO SEGUNDO CONTEO</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for diferencia in diferencias %}
+                        <tr data-codigo-barras="{{ diferencia.codigo_barras }}" data-diferencia-id="{{ diferencia.id }}" data-colaborador="{{ diferencia.nombre_colaborador|default_if_none:''|escapejs }}">
+                            <td>{{ diferencia.codigo_sap }}</td>
+                            <td class="descripcion-cell">{{ diferencia.descripcion }}</td>
+                            <td>{{ diferencia.marca }}</td>
+                            <td>{{ diferencia.talla }}</td>
+                            <td>{{ diferencia.ena }}</td>
+                            <td>{{ diferencia.grupo_articulos }}</td>
+                            <td>{{ diferencia.ubicacion_fisica }}</td>
+                            <td class="numero-cell">{{ diferencia.conteo_fisico }}</td>
+                            <td class="numero-cell">{{ diferencia.stock_sistema }}</td>
+                            <td class="diferencia-cell {% if diferencia.diferencia > 0 %}positiva{% elif diferencia.diferencia < 0 %}negativa{% endif %}">
+                                {{ diferencia.diferencia }}
+                            </td>
+                            <td class="colaborador-cell">
+                                <span id="colaborador-{{ diferencia.codigo_barras }}">{{ diferencia.nombre_colaborador }}</span>
+                            </td>
+                            <td>{{ diferencia.proceso_segundo_conteo }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="12" style="text-align: center; padding: 20px;">
+                                No se encontraron diferencias para este conteo.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <!-- Controles de paginación -->
+                <div id="paginationControls" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
+                    <button id="prev20" class="btn" type="button">« Prev</button>
+                    <span id="pageInfo" style="font-size:13px; color:#333;"></span>
+                    <button id="next20" class="btn" type="button">Next»</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estadísticas por Colaborador -->
+        <div class="card">
+            <h3>Estadísticas por Colaborador</h3>
+            <div class="table-responsive">
+                <table class="data-table" id="tablaStatsColaboradores">
+                    <thead>
+                        <tr>
+                            <th>Colaborador</th>
+                            <th>Total Diferencias</th>
+                            <th>Pendientes</th>
+                            <th>Completadas</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- llenado dinámico -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Redistribuir colaboradores -->
+<div id="modalRedistribuir" class="modal" style="display:none;">
+    <div class="modal-content modal-redistribuir">
+        <div class="modal-header">
+            <h3>Redistribuir Colaboradores</h3>
+            <span class="close" onclick="cerrarModalRedistribuir()">&times;</span>
+        </div>
+
+        <div class="modal-body">
+            <p class="redistribuir-help">
+                Seleccione los colaboradores que participaran en la redistribucion del conteo
+                <strong>{{ conteo.numero_conteo }}</strong>.
+            </p>
+
+            <div id="redistribuirLoading" class="redistribuir-loading" style="display:none;">
+                Cargando colaboradores...
+            </div>
+
+            <div id="redistribuirEmpty" class="redistribuir-empty" style="display:none;">
+                No se encontraron colaboradores asignados para este conteo.
+            </div>
+
+            <div id="listaColaboradoresRedistribuir" class="colaboradores-check-list"></div>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" onclick="cerrarModalRedistribuir()">Cancelar</button>
+            <button id="btnDistribuirRedistribucion" class="btn btn-primary" type="button" onclick="distribuirColaboradores()">Distribuir</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para asignar colaborador -->
+<div id="modalAsignarColaborador" class="modal" style="display:none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Asignar Colaborador a Diferencia</h3>
+            <span class="close" onclick="cerrarModalAsignar()">&times;</span>
+        </div>
+        
+        <div class="modal-body">
+            <div id="colaboradorLoading" style="display:none; color:#052F62; font-weight:bold; margin-bottom:10px;">
+                Cargando colaboradores...
+            </div>
+            
+            <div class="info-diferencia">
+                <p><strong>Código de Barras:</strong> <span id="modal-codigo-barras"></span></p>
+                <p><strong>Producto:</strong> <span id="modal-descripcion"></span></p>
+            </div>
+            
+            <div class="form-group">
+                <label for="colaboradorDropdown">Seleccionar Colaborador:</label>
+                <select id="colaboradorDropdown" style="width:100%;">
+                    <option value="">Seleccione un colaborador...</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="cerrarModalAsignar()">Cancelar</button>
+            <button class="btn btn-primary" onclick="guardarAsignacionColaborador()">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Incluir JavaScript y CSS -->
+<script src="{% static 'js/dashboard.js' %}"></script>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<script>
+// Variables globales
+let colaboradores = [];
+let codigoBarrasSeleccionado = '';
+let diferenciaIdSeleccionada = null; 
+const numeroConteo = '{{ conteo.numero_conteo }}';
+const almacen = '{{ conteo.almacen }}';
+let diferenciasRows = []; // array of all row elements
+let currentStart = 0;
+const PAGE_SIZE = 5;
+let colaboradoresRedistribucion = [];
+
+// ========== FUNCIONES DE LOADING ==========
+function showLoading(message = 'Cargando...') {
+    const overlay = document.getElementById('loadingOverlay');
+    const loadingText = overlay.querySelector('p');
+    loadingText.textContent = message;
+    overlay.style.display = 'flex';
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    overlay.style.display = 'none';
+}
+
+// ========== FUNCIONES AUXILIARES ==========
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// ========== FUNCIONES DEL MODAL ==========
+function abrirModalAsignarColaborador(codigoBarras, descripcion, diferenciaId) {
+    codigoBarrasSeleccionado = codigoBarras;
+    diferenciaIdSeleccionada = diferenciaId;  // ⭐ USAR EL ID ÚNICO
+    
+    console.log('Modal abierto - ID:', diferenciaId, 'Código:', codigoBarras);
+    
+    // Llenar información en el modal
+    document.getElementById('modal-codigo-barras').textContent = codigoBarras;
+    document.getElementById('modal-descripcion').textContent = descripcion;
+    
+    // Mostrar modal
+    document.getElementById('modalAsignarColaborador').style.display = 'block';
+    
+    // Siempre verificar si necesitamos cargar colaboradores
+    if (colaboradores.length === 0) {
+        cargarColaboradores();
+    } else {
+        // Destruir Select2 anterior si existe antes de crear uno nuevo
+        if ($('#colaboradorDropdown').data('select2')) {
+            $('#colaboradorDropdown').select2('destroy');
+        }
+        
+        // Rellenar el dropdown antes de inicializar Select2
+        llenarDropdownColaboradores();
+        
+        // Inicializar Select2 con configuración completa
+        $('#colaboradorDropdown').select2({
+            placeholder: 'Seleccione un colaborador',
+            allowClear: true,
+            width: 'resolve',
+            dropdownParent: $('#modalAsignarColaborador'),
+            matcher: function(params, data) {
+                if ($.trim(params.term) === '') {
+                    return data;
+                }
+                if (data.text.toUpperCase().includes(params.term.toUpperCase())) {
+                    return data;
+                }
+                return null;
+            }
+        });
+    }
+}
+
+function cerrarModalAsignar() {
+    // Destruir Select2 de forma más segura
+    if ($('#colaboradorDropdown').hasClass('select2-hidden-accessible')) {
+        $('#colaboradorDropdown').select2('destroy');
+    }
+    
+    // Ocultar modal
+    document.getElementById('modalAsignarColaborador').style.display = 'none';
+    
+    // Limpiar variables
+    codigoBarrasSeleccionado = '';
+    diferenciaIdSeleccionada = null;
+    
+    // Limpiar dropdown de forma más simple
+    const dropdown = document.getElementById('colaboradorDropdown');
+    dropdown.innerHTML = '<option value="">Seleccione un colaborador...</option>';
+    dropdown.value = '';
+}
+
+function cargarColaboradores() {
+    document.getElementById('colaboradorLoading').style.display = 'block';
+    document.getElementById('colaboradorDropdown').style.display = 'none';
+    
+    fetch(`/obtener-colaboradores/?almacen=${almacen}`)
+        .then(response => response.json())
+        .then(data => {
+            colaboradores = data;
+            console.log('✅ Colaboradores cargados:', colaboradores.length);
+            
+            // Llenar dropdown antes de inicializar Select2
+            llenarDropdownColaboradores();
+            
+            // Destruir Select2 anterior si existe
+            if ($('#colaboradorDropdown').data('select2')) {
+                $('#colaboradorDropdown').select2('destroy');
+            }
+            
+            // Inicializar Select2
+            $('#colaboradorDropdown').select2({
+                placeholder: 'Seleccione un colaborador',
+                allowClear: true,
+                width: 'resolve',
+                dropdownParent: $('#modalAsignarColaborador'),
+                matcher: function(params, data) {
+                    if ($.trim(params.term) === '') {
+                        return data;
+                    }
+                    if (data.text.toUpperCase().includes(params.term.toUpperCase())) {
+                        return data;
+                    }
+                    return null;
+                }
+            });
+            
+            document.getElementById('colaboradorLoading').style.display = 'none';
+            document.getElementById('colaboradorDropdown').style.display = 'block';
+        })
+        .catch(error => {
+            console.error('❌ Error al cargar colaboradores:', error);
+            document.getElementById('colaboradorLoading').style.display = 'none';
+            document.getElementById('colaboradorDropdown').style.display = 'block';
+            alert('Error al cargar colaboradores: ' + error.message);
+        });
+}
+
+function llenarDropdownColaboradores() {
+    const dropdown = document.getElementById('colaboradorDropdown');
+    
+    // Limpiar completamente el dropdown
+    dropdown.innerHTML = '';
+    
+    // Agregar opción por defecto
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.text = 'Seleccione un colaborador...';
+    dropdown.appendChild(defaultOption);
+    
+    // Verificar que tenemos colaboradores
+    if (!colaboradores || colaboradores.length === 0) {
+        console.log('⚠️ No hay colaboradores para llenar el dropdown');
+        return;
+    }
+    
+    // Ordenar colaboradores por apellido
+    const colaboradoresOrdenados = [...colaboradores].sort((a, b) => {
+        const apellidoA = (a.apellido || '').toLowerCase();
+        const apellidoB = (b.apellido || '').toLowerCase();
+        return apellidoA.localeCompare(apellidoB);
+    });
+    
+    colaboradoresOrdenados.forEach(col => {
+        const option = document.createElement('option');
+        option.value = col.id || col.cedula || col.codigo;
+        option.text = `${col.apellido} ${col.nombre} - ${col.cargo} (${col.tienda})`;
+        option.setAttribute('data-cedula', col.id || col.cedula || col.codigo);
+        option.setAttribute('data-nombre', `${col.apellido} ${col.nombre}`);
+        dropdown.appendChild(option);
+    });
+    
+    console.log('✅ Dropdown llenado con', colaboradoresOrdenados.length, 'colaboradores');
+}
+
+function guardarAsignacionColaborador() {
+    const dropdown = document.getElementById('colaboradorDropdown');
+    const cedulaColaborador = dropdown.value;
+    const selectedOption = dropdown.options[dropdown.selectedIndex];
+    const nombreColaborador = selectedOption.getAttribute('data-nombre');
+    
+    if (!cedulaColaborador) {
+        alert('Por favor, seleccione un colaborador.');
+        return;
+    }
+
+    if (!diferenciaIdSeleccionada) {
+        alert('Error: No se ha seleccionado una diferencia válida.');
+        return;
+    }
+       
+    console.log('Guardando asignación:', {
+        diferencia_id: diferenciaIdSeleccionada,
+        cedula_colaborador: cedulaColaborador,
+        nombre_colaborador: nombreColaborador
+    });
+    
+    showLoading('Guardando asignación...');
+    
+    fetch('/asignar-colaborador-diferencia/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+            diferencia_id: diferenciaIdSeleccionada,
+            cedula_colaborador: cedulaColaborador,
+            nombre_colaborador: nombreColaborador
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoading();
+        
+        if (data.success) {
+            // Actualizar la tabla usando el ID único en lugar del código de barras
+            const filaCorrecta = document.querySelector(`tr[data-diferencia-id="${diferenciaIdSeleccionada}"]`);
+            if (filaCorrecta) {
+                const spanColaborador = filaCorrecta.querySelector('.colaborador-cell span');
+                if (spanColaborador) {
+                    spanColaborador.textContent = nombreColaborador;
+                    spanColaborador.parentElement.classList.add('asignado-exitoso');
+                }
+                console.log('✅ Tabla actualizada correctamente para ID:', diferenciaIdSeleccionada);
+            } else {
+                console.log('⚠️ No se encontró la fila con ID:', diferenciaIdSeleccionada);
+            }
+            
+            alert(data.message);
+            cerrarModalAsignar();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        hideLoading();
+        console.error('Error:', error);
+        alert('Error al guardar la asignación: ' + error.message);
+    });
+}
+
+// ========== EVENT LISTENERS ==========
+// Cerrar modal con clicks fuera
+window.onclick = function(event) {
+    const modal = document.getElementById('modalAsignarColaborador');
+    const modalRedistribuir = document.getElementById('modalRedistribuir');
+    if (event.target === modal) {
+        cerrarModalAsignar();
+    }
+    if (event.target === modalRedistribuir) {
+        cerrarModalRedistribuir();
+    }
+}
+
+// Cerrar modal con tecla ESC
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        cerrarModalAsignar();
+        hideLoading();
+    }
+});
+
+// ========== PAGINACIÓN Y FILTRO POR COLABORADOR ==========
+document.addEventListener('DOMContentLoaded', function() {
+    inicializarPaginacion();
+});
+
+function inicializarPaginacion() {
+    const tabla = document.getElementById('tablaDiferencias');
+    if (!tabla) return;
+
+    // Recolectar filas e inicializar array
+    diferenciasRows = Array.from(tabla.querySelectorAll('tbody tr'));
+
+    reconstruirOpcionesFiltroColaborador();
+
+    // Estadísticas iniciales
+    actualizarEstadisticasGlobales();
+
+    // Mostrar primera página
+    renderPage(0);
+
+    // Eventos paginación y filtro
+    document.getElementById('prev20').addEventListener('click', () => changePage(-PAGE_SIZE));
+    document.getElementById('next20').addEventListener('click', () => changePage(PAGE_SIZE));
+    filtro.addEventListener('change', () => {
+        currentStart = 0;
+        renderPage(currentStart);
+    });
+}
+
+function reconstruirOpcionesFiltroColaborador() {
+    const filtro = document.getElementById('filtroColaborador');
+    if (!filtro) return;
+
+    const valorActual = filtro.value || '';
+    filtro.innerHTML = '<option value="">-- Todos --</option>';
+
+    const nombresSet = new Set();
+    diferenciasRows.forEach(row => {
+        const col = row.getAttribute('data-colaborador') || '';
+        const nombre = col.trim() || 'Sin asignar';
+        nombresSet.add(nombre);
+    });
+
+    const nombres = Array.from(nombresSet).sort((a, b) => a.localeCompare(b));
+    nombres.forEach(nombre => {
+        const opt = document.createElement('option');
+        opt.value = nombre === 'Sin asignar' ? '__SIN_ASIGNAR__' : nombre;
+        opt.text = nombre;
+        filtro.appendChild(opt);
+    });
+
+    if ([...filtro.options].some(opt => opt.value === valorActual)) {
+        filtro.value = valorActual;
+    }
+}
+
+function getFilteredRows() {
+    const filtro = document.getElementById('filtroColaborador');
+    const val = filtro ? filtro.value : '';
+    if (!val) return diferenciasRows;
+    return diferenciasRows.filter(r => {
+        const col = (r.getAttribute('data-colaborador') || '').trim();
+        if (val === '__SIN_ASIGNAR__') return !col;
+        return col === val;
+    });
+}
+
+function renderPage(startIndex) {
+    const allFiltered = getFilteredRows();
+    const total = allFiltered.length;
+
+    // Hide all rows first
+    diferenciasRows.forEach(r => r.style.display = 'none');
+
+    // Clamp startIndex
+    if (startIndex < 0) startIndex = 0;
+    if (startIndex >= total) startIndex = Math.max(0, Math.floor((total-1)/PAGE_SIZE)*PAGE_SIZE);
+    currentStart = startIndex;
+
+    // Show slice
+    const slice = allFiltered.slice(currentStart, currentStart + PAGE_SIZE);
+    slice.forEach(r => r.style.display = 'table-row');
+
+    // Update page info
+    const pageInfo = document.getElementById('pageInfo');
+    const startDisplay = total === 0 ? 0 : currentStart + 1;
+    const endDisplay = Math.min(total, currentStart + PAGE_SIZE);
+    pageInfo.textContent = ` ${startDisplay}-${endDisplay}`;
+
+    // Disable/enable buttons
+    document.getElementById('prev20').disabled = currentStart === 0;
+    document.getElementById('next20').disabled = (currentStart + PAGE_SIZE) >= total;
+
+    // Actualizar estadísticas visibles (opcional: por filtro)
+    actualizarEstadisticasFiltradas(allFiltered);
+}
+
+function changePage(delta) {
+    const allFiltered = getFilteredRows();
+    const total = allFiltered.length;
+    let newStart = currentStart + delta;
+    if (newStart < 0) newStart = 0;
+    if (newStart >= total) newStart = Math.max(0, Math.floor((total-1)/PAGE_SIZE)*PAGE_SIZE);
+    renderPage(newStart);
+}
+
+function actualizarEstadisticasGlobales() {
+    const stats = calcularEstadisticasPorColaborador(diferenciasRows);
+    renderCollaboratorStatsTable(stats);
+}
+
+function actualizarEstadisticasFiltradas(filteredRows) {
+    const stats = calcularEstadisticasPorColaborador(filteredRows);
+    renderCollaboratorStatsTable(stats);
+}
+
+function calcularEstadisticasPorColaborador(rows) {
+    const stats = {};
+
+    rows.forEach(r => {
+        const nombre = (r.getAttribute('data-colaborador') || '').trim() || 'Sin asignar';
+        if (!stats[nombre]) {
+            stats[nombre] = {
+                total: 0,
+                pendientes: 0,
+                completadas: 0
+            };
+        }
+
+        stats[nombre].total += 1;
+
+        const tds = r.querySelectorAll('td');
+        let estado = '';
+        if (tds && tds.length > 11) {
+            estado = (tds[11].textContent || '').trim().toUpperCase();
+        }
+
+        if (!estado || estado.includes('PENDIENT')) {
+            stats[nombre].pendientes += 1;
+        } else if (estado.includes('ACEPT') || estado.includes('COMPLET')) {
+            stats[nombre].completadas += 1;
+        } else {
+            stats[nombre].pendientes += 1;
+        }
+    });
+
+    return stats;
+}
+
+function renderCollaboratorStatsTable(stats) {
+    const table = document.getElementById('tablaStatsColaboradores');
+    if (!table) return;
+    const tbody = table.querySelector('tbody');
+    tbody.innerHTML = '';
+
+    const entries = Object.entries(stats).sort((a, b) => b[1].total - a[1].total);
+    if (entries.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="4" class="text-center">No hay diferencias</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+
+    let totalGeneral = 0;
+    let pendientesGeneral = 0;
+    let completadasGeneral = 0;
+
+    entries.forEach(([nombre, dato]) => {
+        const tr = document.createElement('tr');
+        const tdNombre = document.createElement('td');
+        tdNombre.textContent = nombre;
+
+        const tdTotal = document.createElement('td');
+        tdTotal.textContent = dato.total;
+        tdTotal.className = 'text-center';
+
+        const tdPend = document.createElement('td');
+        tdPend.textContent = dato.pendientes;
+        tdPend.className = 'text-center';
+
+        const tdComp = document.createElement('td');
+        tdComp.textContent = dato.completadas;
+        tdComp.className = 'text-center';
+
+        tr.appendChild(tdNombre);
+        tr.appendChild(tdTotal);
+        tr.appendChild(tdPend);
+        tr.appendChild(tdComp);
+        tbody.appendChild(tr);
+
+        totalGeneral += Number(dato.total) || 0;
+        pendientesGeneral += Number(dato.pendientes) || 0;
+        completadasGeneral += Number(dato.completadas) || 0;
+    });
+
+    const trTotal = document.createElement('tr');
+    trTotal.className = 'stats-total-row';
+    trTotal.innerHTML = `
+        <td>TOTAL GENERAL</td>
+        <td class="text-center">${totalGeneral}</td>
+        <td class="text-center">${pendientesGeneral}</td>
+        <td class="text-center">${completadasGeneral}</td>
+    `;
+    tbody.appendChild(trTotal);
+}
+
+function abrirModalRedistribuir() {
+    const modal = document.getElementById('modalRedistribuir');
+    if (!modal) return;
+
+    modal.style.display = 'block';
+    cargarColaboradoresRedistribucion();
+}
+
+function cerrarModalRedistribuir() {
+    const modal = document.getElementById('modalRedistribuir');
+    if (!modal) return;
+    modal.style.display = 'none';
+}
+
+function cargarColaboradoresRedistribucion() {
+    const loading = document.getElementById('redistribuirLoading');
+    const empty = document.getElementById('redistribuirEmpty');
+    const list = document.getElementById('listaColaboradoresRedistribuir');
+    const numeroConteoActual = '{{ conteo.numero_conteo }}';
+
+    if (loading) loading.style.display = 'block';
+    if (empty) empty.style.display = 'none';
+    if (list) list.innerHTML = '';
+
+    fetch(`/obtener-colaboradores-conteo-redistribucion/?numero_conteo=${encodeURIComponent(numeroConteoActual)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (loading) loading.style.display = 'none';
+
+            if (!data.success) {
+                alert(data.message || 'No se pudieron cargar los colaboradores');
+                return;
+            }
+
+            colaboradoresRedistribucion = Array.isArray(data.colaboradores) ? data.colaboradores : [];
+            renderColaboradoresRedistribucion();
+        })
+        .catch(error => {
+            if (loading) loading.style.display = 'none';
+            console.error('Error cargando colaboradores de redistribucion:', error);
+            alert('Error al cargar colaboradores para redistribucion');
+        });
+}
+
+function renderColaboradoresRedistribucion() {
+    const empty = document.getElementById('redistribuirEmpty');
+    const list = document.getElementById('listaColaboradoresRedistribuir');
+    if (!list) return;
+
+    list.innerHTML = '';
+
+    if (!colaboradoresRedistribucion.length) {
+        if (empty) empty.style.display = 'block';
+        return;
+    }
+
+    if (empty) empty.style.display = 'none';
+
+    colaboradoresRedistribucion.forEach((col, idx) => {
+        const item = document.createElement('label');
+        item.className = 'colaborador-check-item';
+
+        const cedula = col.cedula || '';
+        const nombre = col.nombre || 'Sin nombre';
+        const cargo = col.cargo || 'Sin cargo';
+        const tienda = col.tienda || 'Sin tienda';
+
+        item.innerHTML = `
+            <input type="checkbox" class="chk-redistribuir" data-idx="${idx}" checked>
+            <div class="colaborador-check-info">
+                <div class="colaborador-check-name">${nombre}</div>
+                <div class="colaborador-check-meta">${cedula} | ${cargo} | ${tienda}</div>
+            </div>
+        `;
+
+        list.appendChild(item);
+    });
+}
+
+function distribuirColaboradores() {
+    const btnDistribuir = document.getElementById('btnDistribuirRedistribucion');
+    const checks = Array.from(document.querySelectorAll('.chk-redistribuir:checked'));
+    if (!checks.length) {
+        alert('Seleccione al menos un colaborador para distribuir.');
+        return;
+    }
+
+    const seleccionados = checks
+        .map(chk => colaboradoresRedistribucion[Number(chk.getAttribute('data-idx'))])
+        .filter(Boolean)
+        .map(col => ({
+            cedula: (col.cedula || '').trim(),
+            nombre: (col.nombre || '').trim()
+        }))
+        .filter(col => col.cedula && col.nombre);
+
+    if (!seleccionados.length) {
+        alert('No se encontraron colaboradores validos para redistribuir.');
+        return;
+    }
+
+    if (btnDistribuir) {
+        btnDistribuir.disabled = true;
+        btnDistribuir.textContent = 'Distribuyendo...';
+    }
+
+    showLoading('Redistribuyendo pendientes...');
+
+    fetch('/redistribuir-diferencias-segundo-conteo/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+            numero_conteo: numeroConteo,
+            almacen: almacen,
+            colaboradores: seleccionados
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            alert(data.message || 'No se pudo completar la redistribucion.');
+            return;
+        }
+
+        const filasPendientes = diferenciasRows
+            .filter(esFilaPendienteSegundoConteo)
+            .sort((a, b) => {
+                const idA = Number(a.getAttribute('data-diferencia-id')) || 0;
+                const idB = Number(b.getAttribute('data-diferencia-id')) || 0;
+                return idA - idB;
+            });
+
+        filasPendientes.forEach((row, idx) => {
+            const asignacion = seleccionados[idx % seleccionados.length];
+            const nombreNuevo = asignacion.nombre;
+
+            row.setAttribute('data-colaborador', nombreNuevo);
+            const spanColaborador = row.querySelector('.colaborador-cell span');
+            if (spanColaborador) {
+                spanColaborador.textContent = nombreNuevo;
+                spanColaborador.classList.add('asignado-exitoso');
+            }
+
+            row.classList.add('fila-redistribuida');
+            setTimeout(() => row.classList.remove('fila-redistribuida'), 1800);
+        });
+
+        reconstruirOpcionesFiltroColaborador();
+        renderPage(currentStart);
+        cerrarModalRedistribuir();
+
+        const tiempo = data.tiempo_ms ? `\nTiempo backend: ${data.tiempo_ms} ms` : '';
+        alert(`${data.message}\nPendientes: ${data.total_pendientes}\nActualizados: ${data.total_actualizados}${tiempo}`);
+    })
+    .catch(error => {
+        alert('Error al redistribuir: ' + error.message);
+    })
+    .finally(() => {
+        hideLoading();
+        if (btnDistribuir) {
+            btnDistribuir.disabled = false;
+            btnDistribuir.textContent = 'Distribuir';
+        }
+    });
+}
+
+function esFilaPendienteSegundoConteo(row) {
+    const tds = row.querySelectorAll('td');
+    if (!tds || tds.length <= 11) return true;
+    const estado = (tds[11].textContent || '').trim().toUpperCase();
+    if (!estado) return true;
+    if (estado.includes('ACEPT') || estado.includes('COMPLET')) return false;
+    return true;
+}
+</script>
+
+<style>
+/* ========== ESTILOS BASE ========== */
+.action-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 12px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.action-buttons {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+}
+
+/* ========== BOTONES ========== */
+.btn {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    font-size: 11px;
+    height: 30px;
+}
+
+.btn-primary {
+    background: #052F62;
+    color: white;
+    width: auto;
+    min-width: 100px;
+    justify-content: center;
+}
+
+.btn-primary:hover {
+    background: #031B38;
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: #950404;
+    color: white;
+    width: auto;
+    min-width: 100px;
+    justify-content: center;
+}
+
+.btn-secondary:hover {
+    background: #700202ff;
+    transform: translateY(-1px);
+}
+
+.btn-close {
+    background: #950404;
+    color: white;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-close:hover {
+    background: #700202ff;
+    transform: translateY(-1px);
+}
+
+.btn-close-secondary {
+    background: #052F62;
+    color: white;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-close-secondary:hover {
+    background: #041d3d;
+    transform: translateY(-1px);
+}
+
+.btn-icon {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: #052F62;
+    cursor: pointer;
+    border-radius: 6px;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    font-size: 1em;
+}
+
+.btn-icon i {
+    font-size: 1em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-icon:hover {
+    background: #031B38;
+    transform: translateY(-2px);
+}
+
+.btn-danger {
+    background: #950404 !important;
+}
+
+.btn-danger:hover {
+    background: #700202ff !important;
+}
+
+.btn-warning {
+    background: #052F62 !important;
+    margin-right: 5px;
+}
+
+.btn-warning:hover {
+    background: #052F62 !important;
+}
+
+.btn-success {
+    background: #28a745 !important;
+}
+
+.btn-success:hover {
+    background: #218838 !important;
+}
+
+/* ========== CARD CON HEADER Y CLOSE ========== */
+.card-header-with-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.card-header-with-actions h3 {
+    margin: 0;
+    color: #333;
+    font-size: 16px;
+}
+
+/* ========== ESTILOS DEL MODAL BASE ========== */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 20000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.5);
+    backdrop-filter: blur(2px);
+    animation: fadeIn 0.3s ease;
+}
+
+.modal.show {
+    display: block;
+}
+
+.modal-content {
+    background-color: white;
+    margin: 3% auto;
+    padding: 0;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 650px;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    animation: slideIn 0.3s ease;
+}
+
+.modal-header {
+    padding: 15px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    color: #333;
+    margin: 0;
+    font-size: 18px;
+}
+
+.close {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    color: white;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.close:hover {
+    background: #f8f9fa;
+    color: #333;
+}
+
+.modal-body {
+    padding: 15px;
+}
+
+.modal-footer {
+    padding: 15px;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* ========== FORMULARIO DE FILTROS ========== */
+.filter-form {
+    display: grid;
+    gap: 15px;
+}
+
+.filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 5px;
+    font-size: 12px;
+}
+
+.form-control {
+    padding: 8px 10px;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 12px;
+    transition: all 0.2s ease;
+    background: white;
+    height: 30px;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #052F62;
+    box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+}
+
+/* Ajustes específicos para el dropdown de colaborador en el header */
+.card-header-with-actions {
+    overflow: visible; /* permitir que dropdowns se desplieguen fuera del header */
+}
+
+#filtroColaborador {
+    height: 36px;
+    padding: 6px 10px;
+    line-height: 18px;
+    font-size: 13px;
+    box-sizing: border-box;
+    z-index: 1;
+}
+
+/* ========== FILTROS ACTIVOS ========== */
+.active-filters {
+    margin: 15px 0;
+    padding: 12px;
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.active-filters h3 {
+    color: #333;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.filter-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.filter-tag {
+    background: #e4e4e4;
+    color: #052F62;
+    padding: 5px 10px;
+    border-radius: 16px;
+    font-size: 11px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.filter-tag .remove {
+    background: none;
+    border: none;
+    color: #052F62;
+    cursor: pointer;
+    font-size: 12px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.filter-tag .remove:hover {
+    background: rgba(25,118,210,0.1);
+}
+
+/* ========== TABLA DE DATOS ========== */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+    font-size: 11px;
+}
+
+.data-table th,
+.data-table td {
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid #e4e4e4;
+}
+
+.data-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    font-size: 11px;
+}
+
+.data-table tr:hover {
+    background: #f8f9fa;
+}
+
+/* ========== TABLA DE DIFERENCIAS ========== */
+.diferencias-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.diferencias-table th,
+.diferencias-table td {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 1px solid #e4e4e4;
+    vertical-align: middle;
+}
+
+.diferencias-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.diferencias-table tr:hover {
+    background: #f8f9fa;
+}
+
+/* ========== CELDAS ESPECÍFICAS ========== */
+.descripcion-cell {
+    max-width: 200px;
+    word-wrap: break-word;
+    font-size: 11px;
+}
+
+.numero-cell {
+    text-align: center;
+    font-weight: 600;
+}
+
+.diferencia-cell {
+    text-align: center;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+.diferencia-cell.positiva {
+    color: #28a745;
+    background: #d4edda;
+}
+
+.diferencia-cell.negativa {
+    color: #dc3545;
+    background: #f8d7da;
+}
+
+.colaborador-cell {
+    font-size: 11px;
+    max-width: 120px;
+}
+
+.asignado-exitoso {
+    background: #d4edda !important;
+    color: #155724 !important;
+    font-weight: 600;
+    animation: highlight 2s ease-in-out;
+}
+
+.fila-redistribuida {
+    background: #e8f5e9 !important;
+}
+
+@keyframes highlight {
+    0% { background: #28a745 !important; color: white !important; }
+    100% { background: #d4edda !important; color: #155724 !important; }
+}
+
+/* ========== ANIMACIONES ========== */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideIn {
+    from { 
+        opacity: 0;
+        transform: translateY(-40px);
+    }
+    to { 
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ========== ESTADOS ADICIONALES ========== */
+.table-responsive {
+    overflow-x: auto;
+}
+
+.card {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-bottom: 15px;
+}
+
+.card h2 {
+    color: #333;
+    margin-bottom: 12px;
+    font-size: 16px;
+}
+
+.card h3 {
+    color: #333;
+    margin-bottom: 12px;
+    font-size: 16px;
+}
+
+.card-conteo-info {
+    max-width: 1050px;
+}
+
+.card-conteo-info h3 {
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.conteo-info-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(170px, 1fr));
+    gap: 12px;
+    margin-bottom: 0;
+}
+
+.card-conteo-info .form-group label {
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.card-conteo-info .readonly-field {
+    font-size: 11px;
+    height: 30px;
+    padding: 6px 10px;
+}
+
+/* ========== MEJORAS VISUALES ========== */
+.icon {
+    font-style: normal;
+}
+
+.content-header {
+    margin-bottom: 20px;
+}
+
+.content-header h1 {
+    color: #ffffffff;
+    margin: 0 0 8px 0;
+    font-size: 20px;
+}
+
+.content-header p {
+    color: #e4e4e4ff;
+    margin: 0;
+    font-size: 12px;
+}
+
+/* ========== HOVER EFFECTS ========== */
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn-icon:hover {
+    transform: scale(1.05);
+}
+
+.data-table tbody tr:hover {
+    background: #f8f9fa !important;
+}
+
+/* ========== ACCESIBILIDAD ========== */
+.btn:focus,
+.form-control:focus,
+.close:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0,123,255,0.25);
+}
+
+/* ========== UTILIDADES ========== */
+.text-center {
+    text-align: center;
+}
+
+.text-muted {
+    color: #666;
+}
+
+/* ========== LOADING OVERLAY ========== */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(3px);
+}
+
+.loading-spinner {
+    text-align: center;
+    background: white;
+    padding: 25px 40px;
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+}
+
+.spinner {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #052F62;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 12px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-spinner p {
+    margin: 0;
+    color: #333;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+/* ========== HEADER ACTIONS ========== */
+.header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.info-badge {
+    background: #e3f2fd;
+    color: #1976d2;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.btn-redistribuir {
+    background: #0a4a9c;
+    color: white;
+    min-width: 108px;
+    justify-content: center;
+}
+
+.btn-redistribuir:hover {
+    background: #073a7b;
+}
+
+#prev20,
+#next20 {
+    background: transparent !important;
+    color: #000 !important;
+    border: 1px solid #cbd5e1;
+}
+
+#prev20:hover,
+#next20:hover {
+    background: #f8fafc !important;
+    color: #000 !important;
+}
+
+#prev20:disabled,
+#next20:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.modal-redistribuir {
+    max-width: 760px;
+}
+
+.redistribuir-help {
+    margin: 0 0 12px;
+    color: #334155;
+    font-size: 13px;
+}
+
+.redistribuir-loading,
+.redistribuir-empty {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #475569;
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+
+.colaboradores-check-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.colaborador-check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: pointer;
+}
+
+.colaborador-check-item:last-child {
+    border-bottom: none;
+}
+
+.colaborador-check-item:hover {
+    background: #f8fafc;
+}
+
+.colaborador-check-item input[type="checkbox"] {
+    margin-top: 3px;
+}
+
+.colaborador-check-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.colaborador-check-meta {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 2px;
+}
+
+#tablaStatsColaboradores .stats-total-row {
+    background: #eef2ff;
+}
+
+#tablaStatsColaboradores .stats-total-row td {
+    font-weight: 700;
+    border-top: 2px solid #c7d2fe;
+}
+
+.stat-rpro {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+/* ========== FORMULARIO ========== */
+.form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 15px;
+}
+
+.form-group {
+    flex: 1;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #333;
+    font-size: 12px;
+}
+
+.form-group select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.readonly-field {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* ========== INFO DIFERENCIA ========== */
+.info-diferencia {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    border-left: 4px solid #052F62;
+}
+
+.info-diferencia p {
+    margin: 5px 0;
+    font-size: 14px;
+}
+
+.select2-container {
+    z-index: 10001 !important;
+}
+
+.select2-dropdown {
+    z-index: 10002 !important;
+}
+
+/* ========== MEDIA QUERY ESPECÍFICA PARA 1024x768 ========== */
+@media screen and (max-width: 1024px) and (max-height: 768px) {
+    /* Ajustes generales para pantalla pequeña */
+    body {
+        font-size: 11px;
+        overflow-x: hidden;
+    }
+
+    /* Contenido principal más compacto */
+    .main-content {
+        padding: 10px;
+        margin-top: 20px;
+    }
+
+    .content-header {
+        padding: 12px;
+        margin-bottom: 12px;
+    }
+
+    .content-header h1 {
+        font-size: 18px;
+    }
+
+    .content-header p {
+        font-size: 11px;
+    }
+
+    /* Cards más compactos */
+    .card {
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 6px;
+    }
+
+    .card h2 {
+        font-size: 14px;
+        margin-bottom: 8px;
+    }
+
+    .card h3 {
+        font-size: 14px;
+        margin-bottom: 8px;
+    }
+
+    /* Tablas ultra compactas */
+    .data-table {
+        font-size: 10px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 6px 8px;
+    }
+
+    .data-table th {
+        font-size: 10px;
+        padding: 8px 8px;
+    }
+
+    .diferencias-table {
+        font-size: 10px;
+    }
+
+    .diferencias-table th,
+    .diferencias-table td {
+        padding: 6px;
+    }
+
+    /* Botones más pequeños */
+    .btn {
+        padding: 6px 10px;
+        font-size: 10px;
+        height: 28px;
+    }
+
+    .btn-icon {
+        width: 26px;
+        height: 26px;
+        font-size: 0.9em;
+    }
+
+    /* Modal más compacto */
+    .modal-content {
+        margin: 2% auto;
+        max-width: 600px;
+    }
+
+    .modal-header {
+        padding: 12px;
+    }
+
+    .modal-body {
+        padding: 12px;
+    }
+
+    .modal-footer {
+        padding: 12px;
+    }
+}
+
+/* ========== AJUSTES ESPECÍFICOS PARA ALTURA 768px ========== */
+@media screen and (max-width: 1024px) and (max-height: 768px) and (min-width: 769px) {
+    /* Optimizar espacio vertical */
+    .main-content {
+        min-height: calc(100vh - 60px);
+    }
+
+    /* Compactar aún más los elementos */
+    .card {
+        padding: 8px;
+    }
+
+    .data-table {
+        font-size: 9px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 5px 6px;
+    }
+
+    .diferencias-table {
+        font-size: 9px;
+    }
+
+    .diferencias-table th,
+    .diferencias-table td {
+        padding: 5px 6px;
+    }
+
+    /* Reducir aún más los botones */
+    .btn {
+        padding: 5px 8px;
+        font-size: 9px;
+        height: 26px;
+    }
+
+    .btn-icon {
+        width: 24px;
+        height: 24px;
+    }
+}
+
+/* ========== RESPONSIVE DESIGN ========== */
+@media (max-width: 768px) {
+    .action-bar {
+        flex-direction: column;
+        gap: 8px;
+        align-items: stretch;
+    }
+    
+    .modal-content {
+        margin: 1% auto;
+        width: 98%;
+    }
+
+    .filter-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .modal-footer {
+        flex-direction: column;
+    }
+    
+    .data-table {
+        font-size: 10px;
+    }
+    
+    .data-table th,
+    .data-table td {
+        padding: 6px;
+        font-size: 10px;
+    }
+    
+    .diferencias-table {
+        font-size: 10px;
+    }
+    
+    .diferencias-table th,
+    .diferencias-table td {
+        padding: 6px;
+        font-size: 10px;
+    }
+    
+    .btn {
+        padding: 6px 10px;
+    }
+    
+    .card-header-with-actions {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .header-actions {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .form-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .conteo-info-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+}
+
+/* ========== AJUSTES PARA PANTALLAS MUY PEQUEÑAS ========== */
+@media (max-width: 480px) {
+    .descripcion-cell {
+        max-width: 150px;
+    }
+    
+    .colaborador-cell {
+        max-width: 100px;
+    }
+
+    .card-conteo-info {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 1100px) and (min-width: 769px) {
+    .conteo-info-grid {
+        grid-template-columns: repeat(2, minmax(180px, 1fr));
+    }
+}
+</style>
+
+{% csrf_token %}
+{% endblock %}

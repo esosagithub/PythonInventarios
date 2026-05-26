@@ -1,0 +1,1612 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Menú Hamburguesa -->
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <!-- Overlay para menú móvil -->
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Menú Lateral -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                {% if perfil != "ADMINISTRATIVO" %}
+                <li class="menu-item">
+                    <a href="{% url 'gestion_conteos' %}">
+                        <span>Gestión de Conteos</span>
+                    </a>
+                </li>
+                {% endif %}
+
+            </ul>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Contenido Principal -->
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Asigna Colaboradores y Secuenciales</h1>
+            <p>Planificación de Conteo</p>
+        </div>
+
+        <!-- Datos principales del conteo -->
+        <div class="card">
+            <h3>Datos del Conteo</h3>
+            <div class="form-row" style="display: flex; gap: 16px;">
+                <div class="form-group" style="flex: 1;">
+                    <label>Número del Conteo:</label>
+                    <input type="text" value="{{ conteo.numero_conteo }}" readonly class="readonly-field">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Centro:</label>
+                    <input type="text" value="{{ conteo.centro }}" readonly class="readonly-field">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Almacén:</label>
+                    <input type="text" value="{{ conteo.almacen }}" readonly class="readonly-field">
+                </div>
+            </div>
+            <div class="form-row" style="display: flex; gap: 16px; margin-top: 8px;">
+                <div class="form-group" style="flex: 1;">
+                    <label>Fecha Inicio:</label>
+                    <input type="text" value="{{ conteo.fecha_inicio|date:'M. d, Y' }}" readonly class="readonly-field">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Fecha Fin:</label>
+                    <input type="text" value="{{ conteo.fecha_fin|date:'M. d, Y' }}" readonly class="readonly-field">
+                </div>
+
+                <div class="form-group"
+                    style="flex: 1; display: flex; align-items: flex-end; justify-content: flex-end;">
+                    <button class="btn btn-info" type="button" onclick="abrirModalColaboradores('{{ piqueo_id }}')"
+                        style="display: flex; align-items: center; justify-content: center; width: 100%;">
+                        <span style="font-size: 16px;"></span> Asigna Colaboradores
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tabla de detalle de artículos -->
+            <div class="card">
+                <h3>Artículos del Conteo</h3>
+                <table class="tabla-articulos" id="datatable-articulos">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Grupo de Artículos</th>
+                            <th>Línea</th>
+                            <th>Marca</th>
+                            <th>Observaciones</th>
+                            <th>Secuencias</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for articulo in articulos %}
+                        <tr>
+                            <td>{{ articulo.id }}</td>
+                            <td>{{ articulo.grupo_articulos }}</td>
+                            <td>{{ articulo.linea }}</td>
+                            <td>{{ articulo.marca }}</td>
+                            <td>{{ articulo.observaciones }}</td>
+                            <td>
+                                <button class="btn btn-icon-compact" title="Agregar"
+                                    onclick="abrirModal('{{ articulo.id }}')">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="mensaje-tabla-vacia">No hay artículos para este conteo.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para agregar articulos -->
+    <div id="modalAgregar" class="modal"
+        style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999;">
+        <div
+            style="background:white; margin:80px auto; padding:30px; border-radius:8px; max-width:600px; min-width:350px; position:relative;">
+            <span style="position:absolute; top:10px; right:15px; cursor:pointer; font-size:22px;"
+                onclick="cerrarModal()">&times;</span>
+            <h3>Planifica Conteo</h3>
+            <p id="modalArticuloId"></p>
+
+            <!-- Paso 1: Datos adicionales -->
+            <div id="wizard-step-1">
+                <div class="form-row" style="display: flex; gap: 10px; align-items: flex-end;">
+                    <div class="form-group" style="flex: 4;">
+                        <label for="ubicacionWizard">Ubicación:</label>
+                        <select id="ubicacionWizard" class="form-control" style="height: 32px;">
+                            <option value="">Seleccione una ubicación</option>
+                            <option value="PB">PB - Planta Baja</option>
+                            <option value="P1">P1 - Piso 1</option>
+                            <option value="P2">P2 - Piso 2</option>
+                            <option value="PA">PA - Planta Alta </option>
+                            <option value="BO01">BO01 - Bodega 01</option>
+                            <option value="BO02">BO02 - Bodega 02</option>
+                            <option value="BO03">BO03 - Bodega 03</option>
+                            <option value="ST">ST - Sin Toma</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="numeroWizard">Hasta:</label>
+                        <input type="number" id="numeroWizard" class="form-control" placeholder="Mayor a 0">
+                    </div>
+                    <div class="form-group" style="flex: 0 0 auto;">
+                        <button class="btn btn-success" type="button" onclick="agregarUbicacionTemp()"
+                            style="margin-top: 22px; min-width: 90px; display: flex; align-items: center; justify-content: center;">
+                            Agregar
+                        </button>
+                    </div>
+                </div>
+                <div id="ariculosAgregadosContainer2" style="margin-top:20px;">
+                    <h4>Ubicaciones Agregadas</h4>
+                    <div>
+                        <table id="tablaUbicacionesTemp" class="tabla-articulos">
+                            <thead>
+                                <tr>
+                                    <th>ID Conteo</th>
+                                    <th>Ubicación</th>
+                                    <th>Hasta</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Las filas se agregan dinámicamente aquí -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-success btn-igual" type="button"
+                        onclick="guardarSecuenciales()">Guardar</button>
+                    <button class="btn btn-secondary btn-igual" type="button" onclick="cerrarModal()">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para agregar colaboradores -->
+    <div id="modalColaboradores" class="modal"
+        style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999;">
+        <div
+            style="background:white; margin:80px auto; padding:30px; border-radius:8px; max-width:600px; min-width:350px; position:relative;">
+            <span style="position:absolute; top:10px; right:15px; cursor:pointer; font-size:22px;"
+                onclick="cerrarModalColaboradores()">&times;</span>
+            <h3>Asignar Colaboradores</h3>
+            <div id="colaboradorLoading2" style="display:none; color:#052F62; font-weight:bold; margin-bottom:10px;">
+                Cargando colaboradores...
+            </div>
+            <div class="form-group">
+                <label>Colaborador:</label>
+                <select id="colaboradorDropdown2" style="width:100%;"></select>
+            </div>
+            <div class="form-group" style="flex: 0 0 auto;">
+                <button class="btn btn-success" type="button" onclick="agregarColaboradorATabla2()"
+                    style="margin-top: 22px; min-width: 90px; display: flex; align-items: center; justify-content: center;">
+                    Agregar
+                </button>
+            </div>
+            <div id="colaboradoresAgregadosContainer2" style="margin-top:20px;">
+                <h4>Colaboradores Agregados</h4>
+                <div style="max-height: 90px; overflow-y: auto;">
+                    <table id="tablaColaboradoresAgregados2" class="tabla-articulos">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nombre</th>
+                                <th>Cargo</th>
+                                <th>Tienda</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Filas agregadas dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary btn-igual" type="button"
+                    onclick="cerrarModalColaboradores()">Cerrar</button>
+                <button class="btn btn-success btn-igual" type="button"
+                    onclick="guardarColaboradores()">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Incluye Select2 y jQuery -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    <script>
+
+        let ubicacionesTemp = [];
+        let idConteoColaboradores = null;
+        let colaboradores2 = [];
+        let colaboradoresAgregados2 = [];
+        let secuencialesTemp = [];
+
+
+        function abrirModalColaboradores(idConteo) {
+            idConteoColaboradores = idConteo;
+            document.getElementById('modalColaboradores').style.display = 'block';
+
+            // Cargar colaboradores ya guardados para este piqueo_id
+            fetch(`/obtener-colaboradores-piqueo/${idConteo}`)
+                .then(response => response.json())
+                .then(data => {
+                    colaboradoresAgregados2 = data.colaboradores || [];
+                    renderTablaColaboradoresAgregados2();
+                });
+
+            document.getElementById('colaboradorLoading2').style.display = 'block';
+            document.getElementById('colaboradorDropdown2').style.display = 'none';
+
+            // Cargar lista de posibles colaboradores (para el select)
+            const almacen = "{{ conteo.almacen }}";
+            fetch(`/obtener-colaboradores/?almacen=${almacen}`)
+                .then(response => response.json())
+                .then(data => {
+                    colaboradores2 = data;
+                    cargarColaboradoresDropdown2(colaboradores2);
+                    $('#colaboradorDropdown2').select2({
+                        placeholder: 'Seleccione un colaborador',
+                        allowClear: true,
+                        width: 'resolve',
+                        dropdownParent: $('#modalColaboradores'),
+                        matcher: function (params, data) {
+                            if ($.trim(params.term) === '') {
+                                return data;
+                            }
+                            if (data.text.toUpperCase().includes(params.term.toUpperCase())) {
+                                return data;
+                            }
+                            return null;
+                        }
+                    });
+                    document.getElementById('colaboradorLoading2').style.display = 'none';
+                    document.getElementById('colaboradorDropdown2').style.display = 'block';
+                });
+        }
+        function cerrarModalColaboradores() {
+            document.getElementById('modalColaboradores').style.display = 'none';
+            if ($('#colaboradorDropdown2').data('select2')) {
+                $('#colaboradorDropdown2').select2('destroy');
+            }
+            colaboradoresAgregados2 = [];
+            renderTablaColaboradoresAgregados2();
+        }
+
+        function cargarColaboradoresDropdown2(lista) {
+            lista.sort((a, b) => {
+                if ((a.apellido || '') < (b.apellido || '')) return -1;
+                if ((a.apellido || '') > (b.apellido || '')) return 1;
+                return 0;
+            });
+            const dropdown = document.getElementById('colaboradorDropdown2');
+            dropdown.innerHTML = '';
+            lista.forEach(col => {
+                const option = document.createElement('option');
+                option.value = col.id || col.cedula || col.codigo;
+                option.text = `${col.apellido} ${col.nombre} - ${col.cargo} (${col.tienda})`;
+                option.setAttribute('data-nombre', `${col.apellido} ${col.nombre}`);
+                option.setAttribute('data-cargo', col.cargo || '');
+                option.setAttribute('data-tienda', col.tienda || '');
+                dropdown.appendChild(option);
+            });
+        }
+        function agregarColaboradorATabla2() {
+            const dropdown = document.getElementById('colaboradorDropdown2');
+            const colaboradorId = dropdown.value;
+            const selectedOption = dropdown.options[dropdown.selectedIndex];
+            const nombre = selectedOption.getAttribute('data-nombre');
+            const cargo = selectedOption.getAttribute('data-cargo');
+            const tienda = selectedOption.getAttribute('data-tienda');
+            const idConteo = idConteoColaboradores;
+
+            if (!colaboradorId) {
+                alert('Seleccione un colaborador.');
+                return;
+            }
+
+            // Evitar duplicados
+            if (colaboradoresAgregados2.some(c => c.idConteo === idConteo && c.colaboradorId === colaboradorId)) {
+                alert('Este colaborador ya fue agregado para este conteo.');
+                return;
+            }
+
+            // VALIDAR DISPONIBILIDAD
+            fetch(`/validar-colaborador-disponible/?cedula=${colaboradorId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.disponible === false) {
+                        alert(data.message);
+                    } else if (data.disponible === true) {
+                        // Si está disponible, agregar a la tabla
+                        colaboradoresAgregados2.push({
+                            idConteo: idConteoColaboradores,
+                            colaboradorId: colaboradorId,
+                            nombre: nombre,
+                            cargo: cargo,
+                            tienda: tienda
+                        });
+                        renderTablaColaboradoresAgregados2();
+                    } else {
+                        alert('Error al validar disponibilidad: ' + (data.error || 'Respuesta desconocida'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error de red al validar disponibilidad.');
+                });
+        }
+
+        function renderTablaColaboradoresAgregados2() {
+            const tbody = document.querySelector('#tablaColaboradoresAgregados2 tbody');
+            tbody.innerHTML = '';
+            colaboradoresAgregados2.forEach((item, idx) => {
+                const tr = document.createElement('tr'); // <-- Agrega esta línea
+                tr.innerHTML = `
+            <td>${item.idConteo}</td>
+            <td>${item.nombre}</td>
+            <td>${item.cargo}</td>
+            <td>${item.tienda}</td>
+            <td>
+                <button class="btn btn-danger btn-sm" type="button" onclick="eliminarColaboradorAgregado2(${idx}, ${item.empleado_id || null})">Eliminar</button>
+            </td>
+        `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function eliminarColaboradorAgregado2(idx, empleado_id) {
+            // Si tiene empleado_id, eliminar de la base de datos
+            if (empleado_id) {
+                if (!confirm('¿Seguro que deseas eliminar este colaborador?')) return;
+                fetch('/eliminar-colaborador-piqueo/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({ empleado_id: empleado_id })
+                })
+                    .then(resp => resp.json())
+                    .then(data => {
+                        if (data.success) {
+                            colaboradoresAgregados2.splice(idx, 1);
+                            renderTablaColaboradoresAgregados2();
+                        } else {
+                            alert('Error al eliminar: ' + (data.message || ''));
+                        }
+                    })
+                    .catch(err => {
+                        alert('Error de red al eliminar.');
+                    });
+            } else {
+                // Si no tiene empleado_id, solo eliminar del array temporal
+                colaboradoresAgregados2.splice(idx, 1);
+                renderTablaColaboradoresAgregados2();
+            }
+        }
+        function guardarColaboradores() {
+            // Solo envía los que NO tienen empleado_id (nuevos)
+            const nuevosColaboradores = colaboradoresAgregados2.filter(c => !c.empleado_id);
+
+            if (nuevosColaboradores.length === 0) {
+                alert('No hay colaboradores nuevos para guardar.');
+                cerrarModalColaboradores();
+                return;
+            }
+
+            fetch('/guardar-colaboradores/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({ colaboradores: nuevosColaboradores })
+            })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Colaboradores guardados correctamente.');
+                        cerrarModalColaboradores();
+                    } else {
+                        alert('Error al guardar: ' + (data.message || ''));
+                    }
+                })
+                .catch(err => {
+                    alert('Error de red al guardar.');
+                });
+        }
+        // Utilidad para CSRF
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        function abrirModal(detallePiqueoId) {
+            document.getElementById('modalAgregar').style.display = 'block';
+            document.getElementById('modalArticuloId').innerText = 'ID Conteo: ' + detallePiqueoId;
+            window.articuloSeleccionado = detallePiqueoId;
+
+            // Cargar secuenciales ya guardados
+            fetch(`/obtener-secuenciales/${detallePiqueoId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    secuencialesTemp = data.secuenciales || [];
+                    renderTablaSecuenciales();
+                    sugerirProximoNumero();
+                });
+
+            // Limpia campos del wizard
+            document.getElementById('ubicacionWizard').value = '';
+            document.getElementById('numeroWizard').value = '';
+        }
+
+        function agregarUbicacionTemp() {
+            const ubicacionSelect = document.getElementById('ubicacionWizard');
+            const ubicacion = ubicacionSelect.value; // Ya no necesita trim() ni toUpperCase()
+            const numeroWizardInput = document.getElementById('numeroWizard');
+            const rawValue = numeroWizardInput.value.trim();
+            const detallePiqueoId = window.articuloSeleccionado;
+
+            // Obtener el valor mínimo del placeholder
+            const placeholder = numeroWizardInput.placeholder;
+            const valorMinimo = parseInt(placeholder.replace('Mayor a ', '')) || 0;
+
+            // Validación: Campos requeridos
+            if (!ubicacion || ubicacion === '') {
+                alert('Por favor, seleccione una ubicación.');
+                return;
+            }
+
+            // Validación estricta: El campo "Hasta" no puede estar vacío
+            if (!rawValue) {
+                alert('Por favor, ingrese el valor "Hasta".');
+                return;
+            }
+
+            const secuencial = parseInt(rawValue, 10);
+
+            if (isNaN(secuencial)) {
+                alert('Por favor, ingrese un número válido en "Hasta".');
+                return;
+            }
+
+            // Validación: Mayor al último "Hasta"
+            if (secuencial <= valorMinimo) {
+                alert(`El valor "Hasta" debe ser mayor a ${valorMinimo}.`);
+                return;
+            }
+
+            // Validación: No repetidos en "Hasta"
+            if (secuencialesTemp.some(s => Number(s.secuencia_hasta) === secuencial)) {
+                alert('Ya existe una línea con el mismo valor en "Hasta".');
+                return;
+            }
+
+            secuencialesTemp.push({
+                detalle_piqueo_id: detallePiqueoId,
+                ubicacion: ubicacion,
+                secuencia_hasta: secuencial
+            });
+
+            // Ordenar por "Hasta"
+            secuencialesTemp.sort((a, b) => Number(a.secuencia_hasta) - Number(b.secuencia_hasta));
+
+            // Limpiar los campos
+            ubicacionSelect.value = ''; // Resetear el select
+            document.getElementById('numeroWizard').value = '';
+            sugerirProximoNumero(); // Actualizar el placeholder
+
+            renderTablaSecuenciales();
+        }
+        function renderTablaSecuenciales() {
+            const tbody = document.querySelector('#tablaUbicacionesTemp tbody');
+            tbody.innerHTML = '';
+            secuencialesTemp.forEach((item, idx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+            <td>${item.detalle_piqueo_id || window.articuloSeleccionado}</td>
+            <td>${item.ubicacion}</td>
+            <td>${item.secuencia_hasta}</td>
+            <td>
+                <button class="btn btn-danger btn-sm" type="button" onclick="eliminarSecuencial(${idx}, ${item.secuencial_id || null})">Eliminar</button>
+            </td>
+        `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function eliminarSecuencial(idx, secuencial_id) {
+            if (secuencial_id) {
+                if (!confirm('¿Seguro que deseas eliminar este secuencial?')) return;
+                fetch('/eliminar-secuencial/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({ secuencial_id: secuencial_id })
+                })
+                    .then(resp => resp.json())
+                    .then(data => {
+                        if (data.success) {
+                            secuencialesTemp.splice(idx, 1);
+                            renderTablaSecuenciales();
+                            sugerirProximoNumero(); // ← AGREGAR ESTA LÍNEA
+                        } else {
+                            alert('Error al eliminar: ' + (data.message || ''));
+                        }
+                    })
+                    .catch(err => {
+                        alert('Error de red al eliminar.');
+                    });
+            } else {
+                secuencialesTemp.splice(idx, 1);
+                renderTablaSecuenciales();
+                sugerirProximoNumero();
+            }
+        }
+
+        function renderTablaUbicacionesTemp() {
+            const tbody = document.querySelector('#tablaUbicacionesTemp tbody');
+            tbody.innerHTML = '';
+            ubicacionesTemp.forEach((item, idx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+            <td>${item.idConteo}</td>
+            <td>${item.ubicacion}</td>
+            <td>${item.secuencial}</td>
+            <td>
+                <button class="btn btn-danger btn-sm" type="button" onclick="eliminarUbicacionTemp(${idx})">Eliminar</button>
+            </td>
+        `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function eliminarUbicacionTemp(idx) {
+            ubicacionesTemp.splice(idx, 1);
+            renderTablaUbicacionesTemp();
+        }
+
+        function sugerirProximoNumero() {
+            if (secuencialesTemp.length > 0) {
+                const ultimoSecuencial = Math.max(...secuencialesTemp.map(s => Number(s.secuencia_hasta)));
+                document.getElementById('numeroWizard').placeholder = `Mayor a ${ultimoSecuencial}`;
+            } else {
+                document.getElementById('numeroWizard').placeholder = 'Mayor a 0';
+            }
+            document.getElementById('numeroWizard').value = '';
+        }
+
+        // Si quieres limpiar la tabla al cerrar el modal:
+        function cerrarModal() {
+            document.getElementById('modalAgregar').style.display = 'none';
+            secuencialesTemp = [];
+            renderTablaSecuenciales();
+            document.getElementById('numeroWizard').value = '';
+            document.getElementById('numeroWizard').placeholder = 'Mayor a 0';
+        }
+
+        function guardarSecuenciales() {
+            // Solo los que no tienen secuencial_id (nuevos)
+            const nuevosSecuenciales = secuencialesTemp.filter(s => !s.secuencial_id);
+
+            if (nuevosSecuenciales.length === 0) {
+                alert('No hay secuenciales nuevos para guardar.');
+                cerrarModal();
+                return;
+            }
+
+            fetch('/guardar-secuenciales/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({ secuenciales: nuevosSecuenciales })
+            })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Secuenciales guardados correctamente.');
+                        cerrarModal();
+                    } else {
+                        alert('Error al guardar: ' + (data.message || ''));
+                    }
+                })
+                .catch(err => {
+                    alert('Error de red al guardar.');
+                });
+        }
+    </script>
+
+    <style>
+        /* ========== ESTILOS BASE ========== */
+        .select2-container {
+            z-index: 1051 !important;
+        }
+
+        .select2-dropdown {
+            z-index: 99999 !important;
+        }
+
+        .form-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 3px solid #052F62;
+        }
+
+        .form-section h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 16px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .form-group label {
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: #333;
+            font-size: 11px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+            height: 32px;
+        }
+
+        .readonly-field {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #052F62;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            font-size: 12px;
+            height: 32px;
+        }
+
+        .btn-primary {
+            background: #052F62;
+            color: white;
+            width: auto;
+            min-width: 120px;
+        }
+
+        .btn-primary:hover {
+            background: #031B38;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #545b62;
+            transform: translateY(-1px);
+        }
+
+        .btn-success {
+            background: #052F62;
+            color: white;
+            width: auto;
+            min-width: 100px;
+        }
+
+        .btn-success:hover {
+            background: #031B38;
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: #950404;
+            color: white;
+            padding: 2px 6px;
+            font-size: 10px;
+            min-width: unset;
+            width: auto;
+            border-radius: 3px;
+            height: 24px;
+        }
+
+        .btn-danger:hover {
+            background: #740400;
+            transform: translateY(-1px);
+        }
+
+        .btn-info {
+            background: #052F62;
+            color: white;
+            width: auto;
+            min-width: 140px;
+        }
+
+        .btn-info:hover {
+            background: #031B38;
+            transform: translateY(-1px);
+        }
+
+        /* Botón compacto con clase específica */
+        .btn-icon-compact {
+            padding: 3px 5px !important;
+            border: none !important;
+            background: #052F62 !important;
+            cursor: pointer !important;
+            border-radius: 3px !important;
+            font-size: 10px !important;
+            width: 24px !important;
+            height: 24px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            color: white !important;
+            text-decoration: none !important;
+        }
+
+        .btn-icon-compact:hover {
+            background: #031B38 !important;
+            transform: scale(1.05) !important;
+            color: white !important;
+        }
+
+        .btn-icon-compact i {
+            font-size: 11px !important;
+            margin: 0 !important;
+        }
+
+        /* Estilos específicos para el modal de agregar */
+        #modalAgregar #numeroWizard {
+            min-width: 100px;
+            width: 100%;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 12px;
+            transition: all 0.3s ease;
+            height: 32px;
+        }
+
+        #modalAgregar #numeroWizard::placeholder {
+            color: #6c757d;
+            font-style: italic;
+            font-size: 11px;
+            opacity: 0.9;
+        }
+
+        #modalAgregar #numeroWizard:focus {
+            border-color: #052F62;
+            box-shadow: 0 0 0 2px rgba(5, 47, 98, 0.25);
+            outline: none;
+        }
+
+        #modalAgregar #numeroWizard:focus::placeholder {
+            opacity: 0.6;
+        }
+
+        #modalAgregar .form-row .form-group[style*="flex: 1"] {
+            flex: 1 1 auto;
+            min-width: 120px;
+            max-width: 180px;
+        }
+
+        /* ========== ESTILOS PARA TABLAS PRINCIPALES ========== */
+        .tabla-articulos-container {
+            margin-top: 15px;
+        }
+
+        .tabla-articulos-container h4 {
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .tabla-articulos {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 12px;
+            font-size: 11px;
+        }
+
+        .tabla-articulos th,
+        .tabla-articulos td {
+            padding: 6px 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+            line-height: 1.2;
+        }
+
+        .tabla-articulos th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            font-size: 11px;
+            padding: 8px 8px;
+        }
+
+        .tabla-articulos tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        .mensaje-tabla-vacia {
+            text-align: center;
+            padding: 15px;
+            color: #6c757d;
+            font-style: italic;
+            display: block;
+            font-size: 12px;
+        }
+
+        /* ========== ESTILOS ESPECÍFICOS PARA TABLAS EN MODALES ========== */
+
+        /* Contenedor de ubicaciones agregadas más compacto */
+        #ariculosAgregadosContainer2,
+        #colaboradoresAgregadosContainer2 {
+            margin-top: 15px !important;
+            background: #fafbfc;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #f1f3f4;
+        }
+
+        #ariculosAgregadosContainer2 h4,
+        #colaboradoresAgregadosContainer2 h4 {
+            margin-bottom: 8px !important;
+            font-size: 13px !important;
+            color: #333;
+            font-weight: 600;
+        }
+
+        /* Contenedor de scroll - ELIMINAR ALTURA MÁXIMA FIJA para 1024x768 */
+        #ariculosAgregadosContainer2>div,
+        #colaboradoresAgregadosContainer2>div {
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            overflow-y: auto;
+            /* Solo se activará si es necesario */
+        }
+
+        /* Tablas en modales ultra compactas */
+        #tablaUbicacionesTemp,
+        #tablaColaboradoresAgregados2 {
+            font-size: 10px !important;
+            margin: 0 !important;
+            width: 100%;
+        }
+
+        #tablaUbicacionesTemp th,
+        #tablaUbicacionesTemp td,
+        #tablaColaboradoresAgregados2 th,
+        #tablaColaboradoresAgregados2 td {
+            padding: 4px 6px !important;
+            line-height: 1.1 !important;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        #tablaUbicacionesTemp th,
+        #tablaColaboradoresAgregados2 th {
+            font-size: 9px !important;
+            padding: 6px 6px !important;
+            background: #f1f5f9 !important;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        /* Reducir altura de filas en tablas de modales */
+        #tablaUbicacionesTemp tr,
+        #tablaColaboradoresAgregados2 tr {
+            height: 26px !important;
+        }
+
+        /* Columnas específicas más compactas */
+        #tablaUbicacionesTemp td:nth-child(1),
+        /* ID Conteo */
+        #tablaColaboradoresAgregados2 td:nth-child(1) {
+            /* ID */
+            width: 60px;
+            text-align: center;
+        }
+
+        #tablaUbicacionesTemp td:nth-child(2),
+        /* Ubicación */
+        #tablaColaboradoresAgregados2 td:nth-child(2) {
+            /* Nombre */
+            width: 120px;
+        }
+
+        #tablaUbicacionesTemp td:nth-child(3) {
+            /* Hasta */
+            width: 50px;
+            text-align: center;
+        }
+
+        #tablaColaboradoresAgregados2 td:nth-child(3) {
+            /* Cargo */
+            width: 80px;
+        }
+
+        #tablaColaboradoresAgregados2 td:nth-child(4) {
+            /* Tienda */
+            width: 80px;
+        }
+
+        #tablaUbicacionesTemp td:nth-child(4),
+        /* Acción */
+        #tablaColaboradoresAgregados2 td:nth-child(5) {
+            /* Acción */
+            width: 60px;
+            text-align: center;
+        }
+
+        /* Botones de eliminar más compactos en tablas de modales */
+        #tablaUbicacionesTemp .btn-danger,
+        #tablaColaboradoresAgregados2 .btn-danger {
+            padding: 1px 4px !important;
+            font-size: 9px !important;
+            height: 18px !important;
+            min-width: 45px !important;
+            border-radius: 2px !important;
+        }
+
+        /* Hover effects para tablas de modales */
+        #tablaUbicacionesTemp tr:hover,
+        #tablaColaboradoresAgregados2 tr:hover {
+            background: #f5f7fa !important;
+        }
+
+        /* Texto truncado para celdas largas */
+        #tablaUbicacionesTemp td,
+        #tablaColaboradoresAgregados2 td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 0;
+        }
+
+        .btn-igual {
+            min-width: 80px;
+            width: auto;
+            justify-content: center;
+        }
+
+        .form-actions .btn-igual+.btn-igual {
+            margin-left: 8px;
+        }
+
+        #modalAgregar .form-row .form-group {
+            min-width: 0;
+        }
+
+        #modalAgregar .form-row .form-group input {
+            width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+
+        /* ========== ESTILOS DE MODALES ========== */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal>div {
+            background: white;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 95%;
+            max-height: 85vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease;
+        }
+
+        .modal h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 16px;
+        }
+
+        .modal h4 {
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 14px;
+        }
+
+        /* ========== ANIMACIONES ========== */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-40px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ========== SCROLL PERSONALIZADO ========== */
+        .tabla-articulos-container>div::-webkit-scrollbar,
+        #ariculosAgregadosContainer2>div::-webkit-scrollbar,
+        #colaboradoresAgregadosContainer2>div::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        .tabla-articulos-container>div::-webkit-scrollbar-thumb,
+        #ariculosAgregadosContainer2>div::-webkit-scrollbar-thumb,
+        #colaboradoresAgregadosContainer2>div::-webkit-scrollbar-thumb {
+            background: #052F62;
+            border-radius: 3px;
+        }
+
+        .tabla-articulos-container>div::-webkit-scrollbar-thumb:hover,
+        #ariculosAgregadosContainer2>div::-webkit-scrollbar-thumb:hover,
+        #colaboradoresAgregadosContainer2>div::-webkit-scrollbar-thumb:hover {
+            background: #031B38;
+        }
+
+        /* ========== MEDIA QUERY ESPECÍFICA PARA 1024x768 ========== */
+        @media screen and (max-width: 1024px) and (max-height: 768px) {
+
+            /* Ajustes generales para pantalla pequeña */
+            body {
+                font-size: 11px;
+                overflow-x: hidden;
+            }
+
+            /* Contenido principal más compacto */
+            .main-content {
+                padding: 12px;
+                margin-top: 25px;
+            }
+
+            .content-header {
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            .content-header h1 {
+                font-size: 20px;
+            }
+
+            .content-header p {
+                font-size: 12px;
+            }
+
+            /* Cards más compactos */
+            .card {
+                padding: 12px;
+                margin-bottom: 12px;
+                border-radius: 6px;
+            }
+
+            .card h2,
+            .card h3 {
+                font-size: 15px;
+                margin-bottom: 10px;
+            }
+
+            /* Tablas ultra compactas */
+            .tabla-articulos {
+                font-size: 10px;
+            }
+
+            .tabla-articulos th,
+            .tabla-articulos td {
+                padding: 5px 6px;
+            }
+
+            .tabla-articulos th {
+                font-size: 10px;
+                padding: 6px 6px;
+            }
+
+            /* Tablas en modales aún más compactas */
+            #tablaUbicacionesTemp,
+            #tablaColaboradoresAgregados2 {
+                font-size: 9px !important;
+            }
+
+            #tablaUbicacionesTemp th,
+            #tablaUbicacionesTemp td,
+            #tablaColaboradoresAgregados2 th,
+            #tablaColaboradoresAgregados2 td {
+                padding: 3px 5px !important;
+            }
+
+            #tablaUbicacionesTemp tr,
+            #tablaColaboradoresAgregados2 tr {
+                height: 24px !important;
+            }
+
+            /* ELIMINAR ALTURA MÁXIMA FIJA para mostrar todas las filas sin scroll */
+            #ariculosAgregadosContainer2>div,
+            #colaboradoresAgregadosContainer2>div {
+                max-height: none !important;
+                /* Eliminar altura máxima */
+                overflow-y: visible !important;
+                /* Eliminar scroll vertical */
+            }
+
+            /* Ajustar el modal para que quepan más filas */
+            .modal>div {
+                margin: 2% auto;
+                /* Menos margen superior/inferior */
+                padding: 15px;
+                max-height: 95vh;
+                /* Más altura disponible */
+            }
+
+            /* Reducir espacio entre secciones en el modal */
+            #ariculosAgregadosContainer2,
+            #colaboradoresAgregadosContainer2 {
+                margin-top: 12px !important;
+                padding: 6px;
+            }
+
+            /* Formularios más compactos */
+            .form-row {
+                gap: 8px;
+                margin-bottom: 8px;
+            }
+
+            .form-group {
+                min-width: 100px;
+            }
+
+            .form-group input,
+            .form-group select {
+                padding: 5px 8px;
+                font-size: 11px;
+                height: 30px;
+            }
+
+            .form-group label {
+                font-size: 10px;
+            }
+
+            /* Botones más pequeños */
+            .btn {
+                padding: 6px 10px;
+                font-size: 11px;
+                height: 30px;
+            }
+
+            .btn-icon-compact {
+                width: 22px !important;
+                height: 22px !important;
+                font-size: 9px !important;
+            }
+
+            /* Botones de acción en formularios */
+            .form-actions {
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+
+            /* Campos de entrada específicos */
+            #modalAgregar #numeroWizard {
+                font-size: 11px;
+                height: 30px;
+                padding: 5px 8px;
+            }
+
+            /* Asegurar que no haya scroll horizontal */
+            .table-responsive {
+                overflow-x: auto;
+                max-width: 100%;
+            }
+
+            /* Mensajes más compactos */
+            .mensaje-tabla-vacia {
+                padding: 12px;
+                font-size: 11px;
+            }
+        }
+
+        /* ========== AJUSTES ESPECÍFICOS PARA ALTURA 768px ========== */
+        @media screen and (max-width: 1024px) and (max-height: 768px) and (min-width: 769px) {
+
+            /* Optimizar espacio vertical */
+            .main-content {
+                min-height: calc(100vh - 70px);
+            }
+
+            .modal>div {
+                max-height: 92vh;
+                /* Aún más altura para el modal */
+                margin: 1% auto;
+                /* Mínimo margen */
+            }
+
+            /* Compactar aún más los elementos */
+            .card {
+                padding: 10px;
+            }
+
+            .form-section {
+                padding: 12px;
+                margin-bottom: 15px;
+            }
+
+            .tabla-articulos {
+                font-size: 9px;
+            }
+
+            .tabla-articulos th,
+            .tabla-articulos td {
+                padding: 4px 5px;
+            }
+
+            /* Reducir aún más las tablas en modales */
+            #tablaUbicacionesTemp tr,
+            #tablaColaboradoresAgregados2 tr {
+                height: 22px !important;
+            }
+        }
+
+        /* ========== RESPONSIVE DESIGN PARA MÓVILES ========== */
+        @media (max-width: 768px) {
+            .form-row {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .form-group {
+                min-width: 100%;
+            }
+
+            .form-actions {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .btn-igual {
+                min-width: 100%;
+            }
+
+            .form-actions .btn-igual+.btn-igual {
+                margin-left: 0;
+            }
+
+            .tabla-articulos-container {
+                overflow-x: auto;
+            }
+
+            .tabla-articulos {
+                min-width: 600px;
+                font-size: 10px;
+            }
+
+            /* Modales en móviles */
+            .modal>div {
+                margin: 2% auto;
+                width: 98%;
+                padding: 12px;
+                max-height: 90vh;
+                /* En móviles sí puede necesitar scroll */
+            }
+
+            /* En móviles mantener scroll si es necesario */
+            #ariculosAgregadosContainer2>div,
+            #colaboradoresAgregadosContainer2>div {
+                max-height: 120px !important;
+                /* Scroll solo si hay muchas filas */
+                overflow-y: auto !important;
+            }
+
+            /* Cards en móviles */
+            .card {
+                padding: 10px;
+                margin-bottom: 10px;
+            }
+
+            /* Ajustes específicos para formularios en móviles */
+            #modalAgregar .form-row {
+                flex-direction: column;
+            }
+
+            #modalAgregar .form-row .form-group[style*="flex: 1"] {
+                max-width: 100%;
+            }
+
+            /* Botones de acción en móviles */
+            .action-buttons {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .btn-primary,
+            .btn-success,
+            .btn-info {
+                min-width: 100%;
+            }
+
+            /* Tablas en modales para móviles */
+            #tablaUbicacionesTemp,
+            #tablaColaboradoresAgregados2 {
+                font-size: 9px !important;
+            }
+
+            #tablaUbicacionesTemp th,
+            #tablaUbicacionesTemp td,
+            #tablaColaboradoresAgregados2 th,
+            #tablaColaboradoresAgregados2 td {
+                padding: 3px 4px !important;
+            }
+
+            #tablaUbicacionesTemp .btn-danger,
+            #tablaColaboradoresAgregados2 .btn-danger {
+                font-size: 8px !important;
+                height: 16px !important;
+                min-width: 40px !important;
+            }
+        }
+
+        /* ========== AJUSTES ESPECÍFICOS PARA MÓVILES PEQUEÑOS ========== */
+        @media (max-width: 480px) {
+            .main-content {
+                padding: 8px;
+            }
+
+            .content-header {
+                padding: 12px;
+                margin-bottom: 12px;
+            }
+
+            .content-header h1 {
+                font-size: 18px;
+            }
+
+            .content-header p {
+                font-size: 11px;
+            }
+
+            .card {
+                padding: 8px;
+            }
+
+            .tabla-articulos {
+                min-width: 500px;
+                font-size: 9px;
+            }
+
+            .modal>div {
+                margin: 1% auto;
+                padding: 10px;
+            }
+
+            .btn {
+                padding: 5px 8px;
+                font-size: 11px;
+                height: 28px;
+            }
+
+            .form-group input,
+            .form-group select {
+                padding: 4px 6px;
+                font-size: 11px;
+                height: 28px;
+            }
+        }
+
+        /* ========== UTILIDADES ========== */
+        .text-center {
+            text-align: center;
+        }
+
+        .text-muted {
+            color: #666;
+        }
+
+        .mb-0 {
+            margin-bottom: 0;
+        }
+
+        .mt-20 {
+            margin-top: 20px;
+        }
+
+        .p-20 {
+            padding: 20px;
+        }
+
+        .d-none {
+            display: none;
+        }
+
+        .d-block {
+            display: block;
+        }
+
+        .d-flex {
+            display: flex;
+        }
+
+        .justify-center {
+            justify-content: center;
+        }
+
+        .align-center {
+            align-items: center;
+        }
+
+        .gap-10 {
+            gap: 10px;
+        }
+
+        .w-100 {
+            width: 100%;
+        }
+
+        .h-100 {
+            height: 100%;
+        }
+
+        /* ========== HOVER EFFECTS ========== */
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .tabla-articulos tbody tr:hover {
+            background: #f8f9fa !important;
+        }
+
+        /* ========== ACCESIBILIDAD ========== */
+        .btn:focus,
+        .form-control:focus,
+        .close:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        .modal-content:focus {
+            outline: none;
+        }
+
+        #modalAgregar #ubicacionWizard {
+            width: 100%;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 12px;
+            transition: all 0.3s ease;
+            height: 32px;
+            cursor: pointer;
+        }
+
+        #modalAgregar #ubicacionWizard:focus {
+            border-color: #052F62;
+            box-shadow: 0 0 0 2px rgba(5, 47, 98, 0.25);
+            outline: none;
+        }
+
+        #modalAgregar #ubicacionWizard option {
+            padding: 6px;
+        }
+    </style>
+
+    {% endblock %}
