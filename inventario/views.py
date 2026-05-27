@@ -3635,6 +3635,12 @@ def finalizar_conteo(request, piqueo_id):
                 SET estado = 'SEGUNDO_CONTEO'
                 WHERE piqueo_id = %s
             """, [piqueo_id])
+
+            print(f"🔧 [FINALIZAR_CONTEO] Ejecutando stored procedure GENERAR_cierre_conteo2")
+
+            cursor.callproc('GENERAR_cierre_conteo2', [numero_conteo])
+
+            print(f"✅ [FINALIZAR_CONTEO] Stored procedure GENERAR_cierre_conteo2 ejecutado exitosamente")
             
             connection.commit()
             
@@ -5565,6 +5571,406 @@ def acta_preliminar(request):
         'estadisticas': estadisticas,
     }
     return render(request, 'inventario/acta_preliminar.html', context)
+
+
+def tercer_conteo(request):
+    """
+    Vista administrativa para gestionar conteos en estado ACTA_PRELIMINAR.
+    Exclusiva para el perfil ADMINISTRATIVO. Muestra todos los registros sin
+    filtrar por usuario responsable.
+    """
+    if 'usuario' not in request.session:
+        return redirect('login')
+
+    perfil_completo = request.session.get('perfil_seleccionado', {})
+    perfil_nombre = perfil_completo.get('nombre', '') if isinstance(perfil_completo, dict) else ''
+
+    if perfil_nombre != "ADMINISTRATIVO":
+        messages.error(request, 'No tiene permisos para acceder a Tercer Conteo')
+        return redirect('dashboard')
+
+    # Filtros (GET o AJAX POST)
+    filtros = {}
+    if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        try:
+            data = json.loads(request.body)
+            filtros = data.get('filtros', {})
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Error en los datos de filtros'}, status=400)
+    elif request.method == 'GET':
+        filtros['almacen'] = request.GET.get('almacen', '').strip()
+
+    with connection.cursor() as cursor:
+        query = """
+            SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
+            nombre_empleado_func(usuario_responsable) as nm_responsable,
+            usuario_creacion, centro, almacen
+            FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE UPPER(estado) = 'ACTA_PRELIMINAR'
+        """
+        params = []
+
+        if filtros.get('almacen'):
+            query += " AND almacen = %s"
+            params.append(filtros['almacen'])
+
+        query += " ORDER BY fecha_inicio DESC"
+
+        print(f"🔍 [TERCER_CONTEO] Query ejecutado: {query}")
+        print(f"🔍 [TERCER_CONTEO] Parámetros: {params}")
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT DISTINCT almacen, centro FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE UPPER(estado) = 'ACTA_PRELIMINAR'
+            AND almacen IS NOT NULL
+            ORDER BY almacen, centro
+        """)
+        almacenes_disponibles = [
+            {
+                'almacen': r[0],
+                'centro': r[1] or ''
+            }
+            for r in cursor.fetchall()
+        ]
+
+    conteos = [
+        {
+            'piqueo_id': row[0],
+            'numero_conteo': row[1],
+            'estado': row[2],
+            'fecha_inicio': row[3].strftime('%b. %d, %Y') if row[3] else '-',
+            'fecha_fin': row[4].strftime('%b. %d, %Y') if row[4] else '-',
+            'nm_responsable': row[5],
+            'usuario_creacion': row[6],
+            'centro': row[7],
+            'almacen': row[8],
+        }
+        for row in rows
+    ]
+
+    estadisticas = {'total': len(conteos)}
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'conteos': conteos, 'estadisticas': estadisticas})
+
+    context = {
+        'usuario': request.session['usuario'],
+        'perfil': perfil_nombre,
+        'conteos': conteos,
+        'estadisticas': estadisticas,
+        'almacenes_disponibles': almacenes_disponibles,
+        'filtro_almacen': filtros.get('almacen', ''),
+    }
+    return render(request, 'inventario/tercer_conteo.html', context)
+
+
+def detalle_tercer_conteo(request, numero_conteo):
+    """
+    Devuelve el detalle de diferencias del tercer conteo para un numero_conteo.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    perfil_completo = request.session.get('perfil_seleccionado', {})
+    perfil_nombre = perfil_completo.get('nombre', '') if isinstance(perfil_completo, dict) else ''
+
+    if perfil_nombre != "ADMINISTRATIVO":
+        return JsonResponse({'success': False, 'message': 'No tiene permisos para acceder al detalle'}, status=403)
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT numero_conteo, codigo_barras AS codigo, codigo_sap, descripcion,
+                   marca, talla, ena AS ean, grupo_articulos, groes, ubicacion_4,
+                   conteo_4, sap_4, r_pro_4, estado_comparacion_4, diferencia_4,
+                   observacion_4, conteo_3
+            FROM inv_inventario_fisico_vs_sistema
+            WHERE numero_conteo = %s
+            AND estado_comparacion_4 != 'CUADRADO'
+            ORDER BY estado_comparacion_4
+        """, [numero_conteo])
+        rows = cursor.fetchall()
+
+    detalle = [
+        {
+            'numero_conteo': row[0],
+            'codigo': row[1],
+            'codigo_sap': row[2],
+            'descripcion': row[3],
+            'marca': row[4],
+            'talla': row[5],
+            'ean': row[6],
+            'grupo_articulos': row[7],
+            'groes': row[8],
+            'ubicacion_4': row[9],
+            'conteo_4': row[10],
+            'sap_4': row[11],
+            'r_pro_4': row[12],
+            'estado_comparacion_4': row[13],
+            'diferencia_4': row[14],
+            'observacion_4': row[15],
+            'conteo_3': row[16],
+        }
+        for row in rows
+    ]
+
+    return JsonResponse({
+        'success': True,
+        'numero_conteo': numero_conteo,
+        'detalle': detalle,
+        'total': len(detalle),
+    })
+
+
+@require_http_methods(["POST"])
+def guardar_detalle_tercer_conteo(request):
+    """
+    Actualiza el conteo 4 mediante procedure y guarda la observacion 4 del registro.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    perfil_completo = request.session.get('perfil_seleccionado', {})
+    perfil_nombre = perfil_completo.get('nombre', '') if isinstance(perfil_completo, dict) else ''
+
+    if perfil_nombre != "ADMINISTRATIVO":
+        return JsonResponse({'success': False, 'message': 'No tiene permisos para editar el detalle'}, status=403)
+
+    try:
+        data = json.loads(request.body)
+        numero_conteo = data.get('numero_conteo')
+        codigo_sap = data.get('codigo_sap')
+        ean = data.get('ean')
+        conteo_4 = data.get('conteo_4')
+        observacion_4 = data.get('observacion_4', '')
+
+        if not numero_conteo or not codigo_sap or not ean:
+            return JsonResponse({
+                'success': False,
+                'message': 'Faltan datos requeridos: numero_conteo, codigo_sap y ean'
+            }, status=400)
+
+        if not str(observacion_4).strip():
+            return JsonResponse({
+                'success': False,
+                'message': 'La observacion es obligatoria para guardar el registro'
+            }, status=400)
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT almacen
+                FROM INV_PIQUEOS_INVENTARIO_TBL
+                WHERE numero_conteo = %s
+            """, [numero_conteo])
+            conteo_row = cursor.fetchone()
+
+            if not conteo_row:
+                return JsonResponse({
+                    'success': False,
+                    'message': f'No se encontro el almacen del conteo {numero_conteo}'
+                }, status=404)
+
+            almacen = conteo_row[0]
+
+            cursor.callproc('genera_conteo_4', [
+                numero_conteo,
+                almacen,
+                codigo_sap,
+                conteo_4
+            ])
+
+            cursor.execute("""
+                UPDATE inv_inventario_fisico_vs_sistema
+                SET observacion_4 = %s
+                WHERE numero_conteo = %s
+                AND codigo_sap = %s
+                AND ena = %s
+            """, [
+                observacion_4,
+                numero_conteo,
+                codigo_sap,
+                ean
+            ])
+
+            if cursor.rowcount == 0:
+                connection.rollback()
+                return JsonResponse({
+                    'success': False,
+                    'message': 'No se encontro el registro para actualizar la observacion'
+                }, status=404)
+
+            connection.commit()
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Detalle actualizado correctamente',
+            'conteo_4': conteo_4,
+            'observacion_4': observacion_4,
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'message': 'Error al procesar los datos JSON'
+        }, status=400)
+    except Exception as e:
+        print(f"❌ [GUARDAR_DETALLE_TERCER_CONTEO] Error: {str(e)}")
+        connection.rollback()
+        return JsonResponse({
+            'success': False,
+            'message': f'Error al guardar el detalle: {str(e)}'
+        }, status=500)
+
+
+@require_http_methods(["POST"])
+def actualizar_estado_tercer_conteo(request):
+    """
+    Actualiza el estado del conteo de ACTA_PRELIMINAR a TERCER_CONTEO.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    perfil_completo = request.session.get('perfil_seleccionado', {})
+    perfil_nombre = perfil_completo.get('nombre', '') if isinstance(perfil_completo, dict) else ''
+
+    if perfil_nombre != "ADMINISTRATIVO":
+        return JsonResponse({'success': False, 'message': 'No tiene permisos para actualizar el conteo'}, status=403)
+
+    try:
+        data = json.loads(request.body)
+        numero_conteo = data.get('numero_conteo')
+
+        if not numero_conteo:
+            return JsonResponse({
+                'success': False,
+                'message': 'Falta el numero_conteo'
+            }, status=400)
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                UPDATE inv_piqueos_inventario_tbl
+                SET estado = 'TERCER_CONTEO'
+                WHERE numero_conteo = %s
+            """, [numero_conteo])
+
+            if cursor.rowcount == 0:
+                connection.rollback()
+                return JsonResponse({
+                    'success': False,
+                    'message': f'No se encontro el conteo {numero_conteo}'
+                }, status=404)
+
+            connection.commit()
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Conteo actualizado a TERCER_CONTEO',
+            'numero_conteo': numero_conteo,
+            'nuevo_estado': 'TERCER_CONTEO',
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'message': 'Error al procesar los datos JSON'
+        }, status=400)
+    except Exception as e:
+        print(f"❌ [ACTUALIZAR_ESTADO_TERCER_CONTEO] Error: {str(e)}")
+        connection.rollback()
+        return JsonResponse({
+            'success': False,
+            'message': f'Error al actualizar el conteo: {str(e)}'
+        }, status=500)
+
+
+def acta_final(request):
+    """
+    Vista administrativa para consultar conteos en estado TERCER_CONTEO.
+    """
+    if 'usuario' not in request.session:
+        return redirect('login')
+
+    perfil_completo = request.session.get('perfil_seleccionado', {})
+    perfil_nombre = perfil_completo.get('nombre', '') if isinstance(perfil_completo, dict) else ''
+    perfiles_permitidos = ["ADMINISTRATIVO", "ADMINISTRADOR DE INVENTARIO"]
+
+    if perfil_nombre not in perfiles_permitidos:
+        messages.error(request, 'No tiene permisos para acceder a Acta Final')
+        return redirect('dashboard')
+
+    filtros = {}
+    if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        try:
+            data = json.loads(request.body)
+            filtros = data.get('filtros', {})
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Error en los datos de filtros'}, status=400)
+    elif request.method == 'GET':
+        filtros['almacen'] = request.GET.get('almacen', '').strip()
+
+    with connection.cursor() as cursor:
+        query = """
+            SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
+            nombre_empleado_func(usuario_responsable) as nm_responsable,
+            usuario_creacion, centro, almacen
+            FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE UPPER(estado) = 'TERCER_CONTEO'
+        """
+        params = []
+
+        if filtros.get('almacen'):
+            query += " AND almacen = %s"
+            params.append(filtros['almacen'])
+
+        query += " ORDER BY fecha_inicio DESC"
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT DISTINCT almacen, centro FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE UPPER(estado) = 'TERCER_CONTEO'
+            AND almacen IS NOT NULL
+            ORDER BY almacen, centro
+        """)
+        almacenes_disponibles = [
+            {
+                'almacen': r[0],
+                'centro': r[1] or ''
+            }
+            for r in cursor.fetchall()
+        ]
+
+    conteos = [
+        {
+            'piqueo_id': row[0],
+            'numero_conteo': row[1],
+            'estado': row[2],
+            'fecha_inicio': row[3].strftime('%b. %d, %Y') if row[3] else '-',
+            'fecha_fin': row[4].strftime('%b. %d, %Y') if row[4] else '-',
+            'nm_responsable': row[5],
+            'usuario_creacion': row[6],
+            'centro': row[7],
+            'almacen': row[8],
+        }
+        for row in rows
+    ]
+
+    estadisticas = {'total': len(conteos)}
+
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'conteos': conteos, 'estadisticas': estadisticas})
+
+    context = {
+        'usuario': request.session['usuario'],
+        'perfil': perfil_nombre,
+        'conteos': conteos,
+        'estadisticas': estadisticas,
+        'almacenes_disponibles': almacenes_disponibles,
+        'filtro_almacen': filtros.get('almacen', ''),
+    }
+    return render(request, 'inventario/acta_final.html', context)
 
 
 @csrf_exempt

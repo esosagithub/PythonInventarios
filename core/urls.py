@@ -62,6 +62,13 @@ urlpatterns = [
     path('imprimir-zona-secuencia/<int:secuencial_deta_id>/', views.imprimir_zona_secuencia_print, name='imprimir_zona_secuencia'),
     path('imprimir-zonas-cola/', views.imprimir_zonas_cola, name='imprimir_zonas_cola'),
     
+    # Tercer Conteo
+    path('tercer-conteo/', views.tercer_conteo, name='tercer_conteo'),
+    path('detalle-tercer-conteo/<str:numero_conteo>/', views.detalle_tercer_conteo, name='detalle_tercer_conteo'),
+    path('guardar-detalle-tercer-conteo/', views.guardar_detalle_tercer_conteo, name='guardar_detalle_tercer_conteo'),
+    path('actualizar-estado-tercer-conteo/', views.actualizar_estado_tercer_conteo, name='actualizar_estado_tercer_conteo'),
+    path('acta-final/', views.acta_final, name='acta_final'),
+
     # Acta Preliminar
     path('acta-preliminar/', views.acta_preliminar, name='acta_preliminar'),
     path('formulario-acta-preliminar/<int:piqueo_id>/', views.formulario_acta_preliminar, name='formulario_acta_preliminar'),

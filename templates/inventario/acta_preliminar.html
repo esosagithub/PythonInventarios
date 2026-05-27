@@ -36,6 +36,18 @@
                         <span>Dashboard</span>
                     </a>
                 </li>
+                {% if perfil == "ADMINISTRATIVO" %}
+                <li class="menu-item">
+                    <a href="{% url 'tercer_conteo' %}">
+                        <span>Tercer Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'acta_final' %}">
+                        <span>Acta Final</span>
+                    </a>
+                </li>
+                {% endif %}
             </ul>
         </nav>
 

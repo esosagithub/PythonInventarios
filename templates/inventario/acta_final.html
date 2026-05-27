@@ -1,0 +1,500 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Cargando...</p>
+        </div>
+    </div>
+
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                {% if perfil == "ADMINISTRATIVO" %}
+                <li class="menu-item">
+                    <a href="{% url 'administracion_conteo' %}">
+                        <span>Administración de Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'tercer_conteo' %}">
+                        <span>Tercer Conteo</span>
+                    </a>
+                </li>
+                {% endif %}
+                <li class="menu-item active">
+                    <a href="{% url 'acta_final' %}">
+                        <span>Acta Final</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Acta Final</h1>
+            <p>Visualización de conteos en estado Tercer Conteo</p>
+        </div>
+
+        <div class="card" style="margin-bottom: 12px;">
+            <div class="filter-form">
+                <div class="filter-grid">
+                    <div class="form-group">
+                        <label for="filtroAlmacen">Filtrar por Almacén</label>
+                        <select id="filtroAlmacen" class="form-control">
+                            <option value="">-- Todos los almacenes --</option>
+                            {% for alm in almacenes_disponibles %}
+                            <option value="{{ alm.almacen }}" {% if filtro_almacen == alm.almacen %}selected{% endif %}>
+                                {{ alm.almacen }}{% if alm.centro %} - {{ alm.centro }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="justify-content: flex-end; flex-direction: row; align-items: flex-end; gap: 8px;">
+                        <button class="btn btn-primary" onclick="aplicarFiltros()">
+                            <i class="fas fa-filter"></i> Filtrar
+                        </button>
+                        <button class="btn btn-secondary" onclick="limpiarFiltros()">
+                            <i class="fas fa-times"></i> Limpiar
+                        </button>
+                        <button class="btn btn-success" onclick="generarActa()">
+                            <i class="fas fa-file-signature"></i> Genera Acta
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-grid" style="margin-bottom: 15px;">
+            <div class="stat-card">
+                <h3 id="statTotal">{{ estadisticas.total }}</h3>
+                <small>Total en Tercer Conteo</small>
+            </div>
+        </div>
+
+        <div id="conteosContainer" class="card">
+            <h2>Conteo</h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Seleccionar</th>
+                            <th>Número del Conteo</th>
+                            <th>Estado</th>
+                            <th>Fecha Inicio</th>
+                            <th>Fecha Fin</th>
+                            <th>Responsable</th>
+                            <th>Planifica</th>
+                            <th>Centro</th>
+                            <th>Almacén</th>
+                        </tr>
+                    </thead>
+                    <tbody id="conteoTableBody">
+                        {% for conteo in conteos %}
+                        <tr>
+                            <td>
+                                <input type="checkbox" class="conteo-checkbox" value="{{ conteo.numero_conteo }}">
+                            </td>
+                            <td>{{ conteo.numero_conteo }}</td>
+                            <td>
+                                <span class="status-badge status-{{ conteo.estado|lower }}">
+                                    {{ conteo.estado }}
+                                </span>
+                            </td>
+                            <td>{{ conteo.fecha_inicio }}</td>
+                            <td>{{ conteo.fecha_fin }}</td>
+                            <td>{{ conteo.nm_responsable }}</td>
+                            <td>{{ conteo.usuario_creacion }}</td>
+                            <td>{{ conteo.centro }}</td>
+                            <td>{{ conteo.almacen }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="9" style="text-align: center; padding: 20px;">
+                                No hay conteos en estado Tercer Conteo.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{% static 'js/dashboard.js' %}"></script>
+{% csrf_token %}
+<script>
+    let currentFilters = {};
+
+    function showLoading(message = 'Cargando...') {
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.querySelector('p').textContent = message;
+        overlay.style.display = 'flex';
+    }
+
+    function hideLoading() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    }
+
+    function getCsrfToken() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function aplicarFiltros() {
+        const almacen = document.getElementById('filtroAlmacen').value.trim();
+        currentFilters = { almacen };
+        cargarConteos();
+    }
+
+    function limpiarFiltros() {
+        document.getElementById('filtroAlmacen').value = '';
+        currentFilters = {};
+        cargarConteos();
+    }
+
+    function cargarConteos() {
+        showLoading('Aplicando filtros...');
+
+        fetch('{% url "acta_final" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ filtros: currentFilters })
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            actualizarTabla(data.conteos);
+            document.getElementById('statTotal').textContent = data.estadisticas.total;
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error al cargar conteos:', error);
+        });
+    }
+
+    function actualizarTabla(conteos) {
+        const tbody = document.getElementById('conteoTableBody');
+        if (conteos.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;">No hay conteos en estado Tercer Conteo.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = conteos.map(c => `
+            <tr>
+                <td>
+                    <input type="checkbox" class="conteo-checkbox" value="${escapeHtml(c.numero_conteo)}">
+                </td>
+                <td>${escapeHtml(c.numero_conteo)}</td>
+                <td><span class="status-badge status-${escapeHtml((c.estado || '').toLowerCase())}">${escapeHtml(c.estado)}</span></td>
+                <td>${escapeHtml(c.fecha_inicio)}</td>
+                <td>${escapeHtml(c.fecha_fin)}</td>
+                <td>${escapeHtml(c.nm_responsable || '-')}</td>
+                <td>${escapeHtml(c.usuario_creacion || '-')}</td>
+                <td>${escapeHtml(c.centro || '-')}</td>
+                <td>${escapeHtml(c.almacen || '-')}</td>
+            </tr>
+        `).join('');
+    }
+
+    function generarActa() {
+        const seleccionados = Array.from(document.querySelectorAll('.conteo-checkbox:checked'))
+            .map(checkbox => checkbox.value);
+
+        console.log('Conteos seleccionados para generar acta:', seleccionados);
+    }
+</script>
+
+<style>
+    .filter-form {
+        display: grid;
+        gap: 15px;
+    }
+
+    .filter-grid {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: end;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .form-group label {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+        font-size: 12px;
+    }
+
+    .form-control {
+        padding: 8px 10px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        font-size: 12px;
+        transition: all 0.2s ease;
+        background: white;
+        height: 30px;
+    }
+
+    #filtroAlmacen {
+        width: 100%;
+        min-height: 44px;
+        height: 44px;
+        line-height: 1.4;
+        padding: 10px 40px 10px 12px;
+        font-size: 14px;
+        box-sizing: border-box;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: #052F62;
+        box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+    }
+
+    .btn {
+        padding: 8px 12px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        font-size: 11px;
+        height: 32px;
+    }
+
+    .btn-primary {
+        background: #052F62;
+        color: white;
+    }
+
+    .btn-primary:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+        background: #950404;
+        color: white;
+    }
+
+    .btn-secondary:hover {
+        background: #700202;
+        transform: translateY(-1px);
+    }
+
+    .btn-success {
+        background: #198754;
+        color: white;
+    }
+
+    .btn-success:hover {
+        background: #146c43;
+        transform: translateY(-1px);
+    }
+
+    .conteo-checkbox {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+    }
+
+    .status-badge {
+        padding: 3px 6px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 500;
+        background: #c3dbf8ff;
+        color: #052F62;
+    }
+
+    .table-responsive {
+        overflow-x: auto;
+    }
+
+    .card {
+        background: white;
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 15px;
+    }
+
+    .card h2 {
+        color: #333;
+        margin-bottom: 12px;
+        font-size: 16px;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+    }
+
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid #052F62;
+    }
+
+    .stat-card h3 {
+        font-size: 2em;
+        margin: 0;
+        color: #052F62;
+        font-weight: bold;
+    }
+
+    .stat-card small {
+        color: #666;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 11px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid #e4e4e4;
+    }
+
+    .data-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        font-size: 11px;
+    }
+
+    .data-table tr:hover {
+        background: #f8f9fa;
+    }
+
+    .content-header {
+        margin-bottom: 20px;
+    }
+
+    .content-header h1 {
+        color: #ffffffff;
+        margin: 0 0 8px 0;
+        font-size: 20px;
+    }
+
+    .content-header p {
+        color: #e4e4e4ff;
+        margin: 0;
+        font-size: 12px;
+    }
+
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.7);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(3px);
+    }
+
+    .loading-spinner {
+        text-align: center;
+        background: white;
+        padding: 25px 40px;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+
+    .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #052F62;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .loading-spinner p {
+        margin: 0;
+        color: #333;
+        font-weight: 600;
+        font-size: 14px;
+    }
+
+    @media (max-width: 768px) {
+        .filter-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}

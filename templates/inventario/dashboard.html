@@ -39,10 +39,27 @@
                             <span>Administración de Conteo</span>
                         </a>
                     </li>
+                    <li class="menu-item">
+                        <a href="{% url 'tercer_conteo' %}">
+                            <span>Tercer Conteo</span>
+                        </a>
+                    </li>
+                    <li class="menu-item">
+                        <a href="{% url 'acta_final' %}">
+                            <span>Acta Final</span>
+                        </a>
+                    </li>
                     {% elif perfil == "JEFE DE TIENDA" %}
                     <li class="menu-item">
                         <a href="{% url 'administracion_conteo_jefe' %}">
                             <span>Administración de Conteo</span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if perfil == "ADMINISTRADOR DE INVENTARIO" %}
+                    <li class="menu-item">
+                        <a href="{% url 'acta_final' %}">
+                            <span>Acta Final</span>
                         </a>
                     </li>
                     {% endif %}
