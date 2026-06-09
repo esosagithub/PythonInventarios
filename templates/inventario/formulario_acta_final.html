@@ -1,0 +1,690 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load custom_filters %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Cargando...</p>
+        </div>
+    </div>
+
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="menu-item active">
+                    <a href="{% url 'acta_final' %}">
+                        <span>Acta Final</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Formulario Acta Final</h1>
+            <p>Generación de acta final de inventario</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header-with-close">
+                <h2>Datos del Acta Final</h2>
+                <a href="{% url 'acta_final' %}" class="btn btn-close" style="text-decoration: none;">
+                    Volver
+                </a>
+            </div>
+
+            <form id="formActaFinal">
+                {% csrf_token %}
+
+                <!-- Información General -->
+                <div class="form-section">
+                    <h3 class="section-title">Información General del Conteo</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Conteos Incluidos</label>
+                            <input type="text" class="form-control" value="{{ datos_conteo.numeros_conteo }}" readonly
+                                   style="font-size:10px;">
+                        </div>
+
+                        <div class="form-group">
+                            <label>País</label>
+                            <input type="text" class="form-control" name="pais" value="{{ datos_conteo.pais|upper }}" readonly>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Empresa</label>
+                            <input type="text" class="form-control" name="empresa" value="{{ datos_conteo.empresa }}" readonly>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Concepto</label>
+                            <input type="text" class="form-control" name="concepto" value="{{ datos_conteo.concepto }}" readonly>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Centro</label>
+                            <input type="text" class="form-control" name="centro" value="{{ datos_conteo.centro }}" readonly>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Almacén</label>
+                            <input type="text" class="form-control" name="almacen" value="{{ datos_conteo.almacen }}" readonly>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Fecha Primer Conteo</label>
+                            <input type="text" class="form-control" name="fecha_primer_conteo"
+                                value="{{ datos_conteo.fecha_primer_conteo }}" readonly>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Fecha Último Conteo</label>
+                            <input type="text" class="form-control" name="fecha_segundo_conteo"
+                                value="{{ datos_conteo.fecha_segundo_conteo }}" readonly>
+                        </div>
+
+                        <input type="hidden" name="numeros_conteo" value="{{ datos_conteo.numeros_conteo }}">
+                        <input type="hidden" name="tienda" value="{{ datos_conteo.tienda|default:datos_conteo.almacen }}">
+                        <input type="hidden" name="sap_hcm_mcu" value="{{ datos_conteo.sap_hcm_mcu }}">
+                        {% if datos_conteo.acta_final_id %}
+                        <input type="hidden" name="acta_final_id" value="{{ datos_conteo.acta_final_id }}">
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Personal Ejecutando Toma Física -->
+                <div class="form-section">
+                    <h3 class="section-title">Personal Ejecutando Toma Física</h3>
+                    <div class="form-grid form-grid-3">
+                        <div class="form-group">
+                            <label>Jefe de Tienda</label>
+                            <input type="number" class="form-control" name="jefe_tienda"
+                                value="{{ datos_conteo.jefe_tienda }}" readonly min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Subjefe de Tienda</label>
+                            <input type="number" class="form-control" name="subjefe_tienda"
+                                value="{{ datos_conteo.subjefe_tienda }}" readonly min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Auxiliar Ventas</label>
+                            <input type="number" class="form-control" name="auxiliar_ventas"
+                                value="{{ datos_conteo.auxiliar_ventas }}" readonly min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Auxiliar Caja</label>
+                            <input type="number" class="form-control" name="auxiliar_caja"
+                                value="{{ datos_conteo.auxiliar_caja }}" readonly min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Auxiliar Bodega</label>
+                            <input type="number" class="form-control" name="auxiliar_bodega"
+                                value="{{ datos_conteo.auxiliar_bodega }}" readonly min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Auxiliar Operativo</label>
+                            <input type="number" class="form-control" name="auxiliar_operativo"
+                                value="{{ datos_conteo.auxiliar_operativo }}" readonly min="0">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Personal Administrativo -->
+                <div class="form-section">
+                    <h3 class="section-title">Personal Administrativo Presente</h3>
+                    <div class="form-grid form-grid-3">
+                        <div class="form-group">
+                            <label>Asistente Control Inventario</label>
+                            <input type="number" class="form-control" name="asistente_opertaivo_inventario"
+                                value="{{ datos_conteo.asistente_opertaivo_inventario }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Jefe Regional de Inventarios</label>
+                            <input type="number" class="form-control" name="jefe_inventarios"
+                                value="{{ datos_conteo.jefe_inventarios }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Auditor Interno</label>
+                            <input type="number" class="form-control" name="auditor_interno"
+                                value="{{ datos_conteo.auditor_interno }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Contador</label>
+                            <input type="number" class="form-control" name="contado"
+                                value="{{ datos_conteo.contado }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Gerente Regional</label>
+                            <input type="number" class="form-control" name="gerente_regional"
+                                value="{{ datos_conteo.gerente_regional }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Supervisor Comercial</label>
+                            <input type="number" class="form-control" name="supervisor_comercial"
+                                value="{{ datos_conteo.supervisor_comercial }}" min="0">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stock SAP -->
+                <div class="form-section">
+                    <h3 class="section-title">Stock SAP</h3>
+                    <div class="form-grid" style="grid-template-columns: repeat(2, 1fr);">
+                        {% for item in datos_conteo.stock_sap_items %}
+                        <div class="form-group">
+                            <label>Descripción</label>
+                            <input type="text" class="form-control" name="stock_sap_descripcion_{{ forloop.counter }}"
+                                value="{{ item.tipo }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Stock {{ item.tipo }}</label>
+                            <input type="text" class="form-control" name="stock_sap_valor_{{ forloop.counter }}"
+                                value="{{ item.valor|format_number }}" readonly>
+                        </div>
+                        {% endfor %}
+                        <div class="form-group">
+                            <label>Total Stock SAP</label>
+                            <input type="text" class="form-control total-readonly" name="stock_sap_total"
+                                value="{{ datos_conteo.stock_sap_total|format_number }}" readonly>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Items Inventarios -->
+                <div class="form-section">
+                    <h3 class="section-title">Items Inventarios (Suma de Conteos Seleccionados)</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Cantidad Marcas</label>
+                            <input type="text" class="form-control" name="cantidad_marcas"
+                                value="{{ datos_conteo.cantidad_marcas|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Cantidad Líneas</label>
+                            <input type="text" class="form-control" name="cantidad_lineas"
+                                value="{{ datos_conteo.cantidad_lineas|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Cantidad Items</label>
+                            <input type="text" class="form-control" name="cantidad_items"
+                                value="{{ datos_conteo.cantidad_items|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Cantidad Items Faltantes</label>
+                            <input type="text" class="form-control" name="cantidad_items_faltantes"
+                                value="{{ datos_conteo.cantidad_items_faltantes|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Cantidad Items Sobrantes</label>
+                            <input type="text" class="form-control" name="cantidad_items_sobrantes"
+                                value="{{ datos_conteo.cantidad_items_sobrantes|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Valor Items Faltantes ($)</label>
+                            <input type="hidden" name="valor_items_faltantes" value="{{ datos_conteo.valor_items_faltantes }}">
+                            <input type="text" class="form-control" name="valor_items_faltantes_display"
+                                value="{{ datos_conteo.valor_items_faltantes|format_currency }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Valor Items Sobrantes ($)</label>
+                            <input type="hidden" name="valor_items_sobrantes" value="{{ datos_conteo.valor_items_sobrantes }}">
+                            <input type="text" class="form-control" name="valor_items_sobrantes_display"
+                                value="{{ datos_conteo.valor_items_sobrantes|format_currency }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Código Inventario</label>
+                            <input type="text" class="form-control" name="codigo_inventario"
+                                value="{{ datos_conteo.codigo_inventario }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Líneas de Diferencias</label>
+                            <input type="text" class="form-control" name="lineas_diferencias"
+                                value="{{ datos_conteo.lineas_diferencias }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Hora Generó Informe Inventario SAP</label>
+                            <input type="datetime-local" class="form-control" name="hora_genero_informe_inven_sap"
+                                value="{{ datos_conteo.hora_genero_informe_inven_sap }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Toma Física Grupo</label>
+                            <input type="text" class="form-control" name="toma_fisica_grupo"
+                                value="{{ datos_conteo.toma_fisica_grupo }}" readonly
+                                style="background-color: #e9ecef; cursor: not-allowed;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventarios Anteriores -->
+                <div class="form-section">
+                    <h3 class="section-title">Información de Inventarios Anteriores</h3>
+                    <div class="form-grid form-grid-3" style="gap: 18px 24px; align-items: end;">
+                        <div class="form-group">
+                            <label>Se confirmó encerado de guías de remisión.</label>
+                            <div style="display:flex; gap:12px; align-items:center; margin-top:6px;">
+                                <div class="form-check" style="display:flex; align-items:center;">
+                                    <input class="form-check-input" type="radio" name="confirmo_encerado_guia_remi"
+                                        id="confirmo_encerado_si" value="SI"
+                                        {% if datos_conteo.confirmo_encerado_guia_remi == 'SI' %}checked{% endif %}>
+                                    <label class="form-check-label" for="confirmo_encerado_si" style="margin-left:6px;">SI</label>
+                                </div>
+                                <div class="form-check" style="display:flex; align-items:center;">
+                                    <input class="form-check-input" type="radio" name="confirmo_encerado_guia_remi"
+                                        id="confirmo_encerado_no" value="NO"
+                                        {% if datos_conteo.confirmo_encerado_guia_remi != 'SI' %}checked{% endif %}>
+                                    <label class="form-check-label" for="confirmo_encerado_no" style="margin-left:6px;">NO</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Fecha Toma Física Anterior</label>
+                            <input type="date" class="form-control" name="fecha_toma_fisica_anterior"
+                                value="{{ datos_conteo.fecha_toma_fisica_anterior }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Cantidad Items toma física parcial último inventario {{ datos_conteo.anio_anterior }}</label>
+                            <input type="text" class="form-control" name="cantidad_item_ultimo_inv"
+                                value="{{ datos_conteo.cantidad_item_ultimo_inv|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Número de tomas Físicas anteriores en el año {{ datos_conteo.anio_anterior }}</label>
+                            <input type="text" class="form-control" name="numero_toma_fisica_anterior"
+                                value="{{ datos_conteo.numero_toma_fisica_anterior }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Cantidad Item Acumulado Anual</label>
+                            <input type="text" class="form-control" name="cantidad_item_acumula_anual"
+                                value="{{ datos_conteo.cantidad_item_acumula_anual|format_number }}" readonly>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resumen Operativo -->
+                <div class="form-section">
+                    <h3 class="section-title">Resumen Operativo</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Cantidad de toma revisada</label>
+                            <input type="text" class="form-control" name="cantidad_toma_revisada"
+                                value="{{ datos_conteo.cantidad_toma_revisada|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>% Inventariado</label>
+                            <input type="text" class="form-control" name="porcentaje_inventariado_hoy"
+                                value="{{ datos_conteo.porcentaje_inventariado_hoy }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Total de ítems por inventariar</label>
+                            <input type="text" class="form-control" name="total_items_por_inventariar"
+                                value="{{ datos_conteo.total_items_por_inventariar|format_number }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label># horas suspendidas atención cliente</label>
+                            <input type="number" class="form-control" name="horas_suspendidas_atencion"
+                                value="{{ datos_conteo.horas_suspendidas_atencion }}" min="0" step="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label>Total gastos ejecución toma física ($)</label>
+                            <input type="text" class="form-control moneda-formato" name="total_gastos_ejecucion"
+                                value="{{ datos_conteo.total_gastos_ejecucion|default:'0'|format_currency }}" min="0">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Valores de Caja -->
+                <div class="form-section">
+                    <h3 class="section-title">Valores de Caja Chica</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Valor Efectivo ($)</label>
+                            <input type="text" class="form-control moneda-formato" name="valor_efectivo"
+                                value="{{ datos_conteo.valor_efectivo|default:'0'|format_currency }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Valor Facturas ($)</label>
+                            <input type="text" class="form-control moneda-formato" name="valor_facturas"
+                                value="{{ datos_conteo.valor_facturas|default:'0'|format_currency }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Valor Cheques ($)</label>
+                            <input type="text" class="form-control moneda-formato" name="valor_cheques"
+                                value="{{ datos_conteo.valor_cheques|default:'0'|format_currency }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Fondo Caja ($)</label>
+                            <input type="text" class="form-control moneda-formato" name="fondo_caja"
+                                value="{{ datos_conteo.fondo_caja|default:'0'|format_currency }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Fondo Sueltos ($)</label>
+                            <input type="text" class="form-control moneda-formato" name="fondo_sueltos"
+                                value="{{ datos_conteo.fondo_sueltos|default:'0'|format_currency }}" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Total ($)</label>
+                            <input type="text" class="form-control total-readonly" name="total" value="0,00" readonly>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sucursal y Últimas Facturas -->
+                <div class="form-section">
+                    <h3 class="section-title">Sucursal y Últimas Facturas</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Sucursal</label>
+                            <input type="text" class="form-control" name="sucursal"
+                                value="{{ datos_conteo.sucursal }}" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Última Factura Caja 030</label>
+                            <input type="number" class="form-control" name="ultima_fact_caja1"
+                                value="{{ datos_conteo.ultima_fact_caja1 }}" min="0" step="1"
+                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                        </div>
+                        <div class="form-group">
+                            <label>Última Factura Caja 031</label>
+                            <input type="number" class="form-control" name="ultima_fact_caja2"
+                                value="{{ datos_conteo.ultima_fact_caja2 }}" min="0" step="1"
+                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                        </div>
+                        <div class="form-group">
+                            <label>Última Factura Caja 032</label>
+                            <input type="number" class="form-control" name="ultima_fact_caja3"
+                                value="{{ datos_conteo.ultima_fact_caja3 }}" min="0" step="1"
+                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                        </div>
+                        <div class="form-group">
+                            <label>Última Factura Caja 033</label>
+                            <input type="number" class="form-control" name="ultima_fact_caja4"
+                                value="{{ datos_conteo.ultima_fact_caja4 }}" min="0" step="1"
+                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                        </div>
+                        <div class="form-group">
+                            <label>Última Factura Caja 060</label>
+                            <input type="number" class="form-control" name="ultima_fact_caja5"
+                                value="{{ datos_conteo.ultima_fact_caja5 }}" min="0" step="1"
+                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                        </div>
+                        <div class="form-group">
+                            <label>Último Doc. Guía Remisión</label>
+                            <input type="number" class="form-control" name="ultimo_doc_guia_remision"
+                                value="{{ datos_conteo.ultimo_doc_guia_remision }}" min="0" step="1"
+                                inputmode="numeric" pattern="\d*" placeholder="Ej: 123456">
+                        </div>
+                        <div class="form-group">
+                            <label>Último Doc. Nota Crédito</label>
+                            <input type="number" class="form-control" name="ultimo_doc_nota_credit"
+                                value="{{ datos_conteo.ultimo_doc_nota_credit }}" min="0" step="1"
+                                inputmode="numeric" pattern="\d*" placeholder="Ej: 123456">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Firmas de responsabilidad -->
+                <div class="form-section">
+                    <h3 class="section-title">Firmas de responsabilidad</h3>
+                    <div class="form-grid form-grid-2">
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="gerente_operaciones_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.gerente_operaciones_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="gerente_operaciones_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.gerente_operaciones_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="jefe_inventarios_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.jefe_inventarios_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="jefe_inventarios_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.jefe_inventarios_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="supervisor_comercial_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.supervisor_comercial_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="supervisor_comercial_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.supervisor_comercial_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="asistente_control_inventarios_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.asistente_control_inventarios_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="asistente_control_inventarios_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.asistente_control_inventarios_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="jefe_tienda_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.jefe_tienda_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="jefe_tienda_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.jefe_tienda_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="sub_jefe_tienda_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.sub_jefe_tienda_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="sub_jefe_tienda_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.sub_jefe_tienda_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="contador_general_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.contador_general_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="contador_general_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.contador_general_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                        <div class="form-group">
+                            <input type="text" class="form-control" name="auditor_interno_cargo"
+                                placeholder="Cargo" value="{{ datos_conteo.auditor_interno_cargo }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                            <input type="text" class="form-control" name="auditor_interno_firma"
+                                placeholder="Nombre y Apellido" value="{{ datos_conteo.auditor_interno_firma }}"
+                                oninput="this.value = this.value.toUpperCase()">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <a href="{% url 'acta_final' %}" class="btn btn-close-secondary" style="text-decoration: none;">
+                        Cancelar
+                    </a>
+                    <button type="submit" class="btn btn-primary">
+                        Guardar Acta Final
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="{% static 'js/dashboard.js' %}"></script>
+<script>
+    function showLoading(message = 'Cargando...') {
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.querySelector('p').textContent = message;
+        overlay.style.display = 'flex';
+    }
+
+    function hideLoading() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    }
+
+    function getCsrfToken() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
+
+    function formatoMoneda(valor) {
+        if (!valor || valor === '') return '0,00';
+        let numero = valor.toString().replace(/[^\d.,\-]/g, '');
+        numero = numero.replace(',', '.');
+        let num = parseFloat(numero) || 0;
+        return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatearCampoMoneda(input) {
+        if (!input.value) { input.value = '0,00'; return; }
+        input.value = formatoMoneda(input.value);
+    }
+
+    function formatearTodosLosCamposMoneda() {
+        document.querySelectorAll('.moneda-formato').forEach(input => formatearCampoMoneda(input));
+    }
+
+    function calcularTotal() {
+        function obtenerValorNumerico(valor) {
+            if (!valor) return 0;
+            let limpio = valor.toString().replace(/[^\d.,\-]/g, '');
+            limpio = limpio.replace(',', '.');
+            return parseFloat(limpio) || 0;
+        }
+        const total = ['valor_efectivo', 'valor_facturas', 'valor_cheques', 'fondo_caja', 'fondo_sueltos']
+            .reduce((sum, campo) => {
+                const el = document.querySelector(`[name="${campo}"]`);
+                return sum + (el ? obtenerValorNumerico(el.value) : 0);
+            }, 0);
+        document.querySelector('[name="total"]').value = total.toLocaleString('es-ES', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2
+        });
+    }
+
+    document.getElementById('formActaFinal').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        if (!confirm('¿Está seguro de guardar el acta final?')) return;
+
+        showLoading('Guardando acta final...');
+
+        const formData = new FormData(this);
+        const data = {};
+        formData.forEach((value, key) => {
+            if (key.includes('valor_') || key.includes('fondo_') || key === 'total' || key === 'total_gastos_ejecucion') {
+                let limpio = value.toString().replace(/[^\d.,\-]/g, '');
+                limpio = limpio.replace(',', '.');
+                data[key] = limpio;
+            } else {
+                data[key] = value;
+            }
+        });
+
+        fetch('{% url "guardar_acta_final" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(result => {
+            hideLoading();
+            if (result.success) {
+                alert('Acta final guardada exitosamente.');
+                window.location.href = '{% url "acta_final" %}';
+            } else {
+                alert('Error: ' + result.message);
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error:', error);
+            alert('Error al guardar el acta final.');
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+        formatearTodosLosCamposMoneda();
+
+        const camposMoneda = ['valor_efectivo', 'valor_facturas', 'valor_cheques', 'fondo_caja', 'fondo_sueltos', 'total_gastos_ejecucion'];
+        camposMoneda.forEach(campo => {
+            const input = document.querySelector(`[name="${campo}"]`);
+            if (input) {
+                input.addEventListener('blur', function () {
+                    formatearCampoMoneda(this);
+                    if (campo !== 'total_gastos_ejecucion') calcularTotal();
+                });
+                if (campo !== 'total_gastos_ejecucion') {
+                    input.addEventListener('input', calcularTotal);
+                }
+            }
+        });
+
+        calcularTotal();
+    });
+</script>
+
+<style>
+    .action-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 12px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .btn { padding: 8px 12px; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: 500; transition: all 0.2s ease; font-size: 11px; height: 32px; }
+    .btn-primary { background: #052F62; color: white; width: 220px; height: 36px; justify-content: center; box-sizing: border-box; padding: 0; }
+    .btn-primary:hover { background: #031B38; transform: translateY(-1px); }
+    .btn-close { width: 220px; height: 36px; background: #950404; color: white; text-align: center; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 0; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; }
+    .btn-close:hover { background: #700202; transform: translateY(-1px); }
+    .btn-close-secondary { width: 220px; height: 36px; background: #950404; color: white; text-align: center; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 0; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; }
+    .btn-close-secondary:hover { background: #700202; transform: translateY(-1px); }
+    .card-header-with-close { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 1px solid #e9ecef; }
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label { font-weight: 600; color: #333; margin-bottom: 5px; font-size: 11px; }
+    .form-control { padding: 10px 10px !important; border: 2px solid #e9ecef !important; border-radius: 6px !important; font-size: 11px !important; transition: all 0.2s ease !important; background: white !important; height: 32px !important; min-height: 32px !important; max-height: 32px !important; line-height: 1.2 !important; box-sizing: border-box !important; }
+    .form-control:focus { outline: none !important; border-color: #052F62 !important; box-shadow: 0 0 0 3px rgba(5,47,98,0.1) !important; }
+    .form-control:read-only, input.form-control[readonly] { background: #e9ecef !important; cursor: not-allowed !important; color: #666 !important; border-color: #ced4da !important; }
+    .form-section { margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #052F62; }
+    .section-title { color: #052F62; font-size: 14px; font-weight: 600; margin: 0 0 12px 0; padding-bottom: 6px; border-bottom: 1px solid #dee2e6; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .form-grid-3 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+    .form-grid-2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; padding-top: 15px; border-top: 2px solid #e9ecef; }
+    .card { background: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 15px; }
+    .card h2 { color: #333; margin-bottom: 12px; font-size: 16px; }
+    .content-header { margin-bottom: 20px; }
+    .content-header h1 { color: #fff; margin: 0 0 8px 0; font-size: 20px; }
+    .content-header p { color: #e4e4e4; margin: 0; font-size: 12px; }
+    .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; justify-content: center; align-items: center; backdrop-filter: blur(3px); }
+    .loading-spinner { text-align: center; background: white; padding: 25px 40px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #052F62; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .loading-spinner p { margin: 0; color: #333; font-weight: 600; font-size: 14px; }
+    @media (max-width: 768px) {
+        .form-grid, .form-grid-3, .form-grid-2 { grid-template-columns: 1fr; }
+        .form-actions { flex-direction: column; }
+    }
+</style>
+
+{% endblock %}

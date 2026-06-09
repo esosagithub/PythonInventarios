@@ -5899,15 +5899,93 @@ def acta_final(request):
         messages.error(request, 'No tiene permisos para acceder a Acta Final')
         return redirect('dashboard')
 
-    filtros = {}
     if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         try:
             data = json.loads(request.body)
-            filtros = data.get('filtros', {})
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Error en los datos de filtros'}, status=400)
+
+        if data.get('action') == 'generar_acta_final':
+            numeros_conteo = data.get('numeros_conteo', [])
+            if not isinstance(numeros_conteo, list):
+                return JsonResponse({
+                    'success': False,
+                    'message': 'La selección de conteos no es válida'
+                }, status=400)
+
+            numeros_conteo = [str(numero).strip() for numero in numeros_conteo if str(numero).strip()]
+            numeros_conteo = list(dict.fromkeys(numeros_conteo))
+
+            if not numeros_conteo:
+                return JsonResponse({
+                    'success': False,
+                    'message': 'Seleccione al menos un conteo para generar el acta final'
+                }, status=400)
+
+            placeholders = ','.join(['%s'] * len(numeros_conteo))
+            with connection.cursor() as cursor:
+                cursor.execute(f"""
+                    SELECT numero_conteo, centro, almacen, estado
+                    FROM INV_PIQUEOS_INVENTARIO_TBL
+                    WHERE numero_conteo IN ({placeholders})
+                """, numeros_conteo)
+                rows = cursor.fetchall()
+
+            conteos_encontrados = [
+                {
+                    'numero_conteo': row[0],
+                    'centro': (row[1] or '').strip(),
+                    'almacen': (row[2] or '').strip(),
+                    'estado': (row[3] or '').strip(),
+                }
+                for row in rows
+            ]
+            numeros_encontrados = {str(conteo['numero_conteo']).strip() for conteo in conteos_encontrados}
+            numeros_faltantes = [numero for numero in numeros_conteo if numero not in numeros_encontrados]
+
+            if numeros_faltantes:
+                return JsonResponse({
+                    'success': False,
+                    'message': 'No se encontraron todos los conteos seleccionados',
+                    'numeros_faltantes': numeros_faltantes,
+                }, status=404)
+
+            estados_invalidos = [
+                conteo['numero_conteo']
+                for conteo in conteos_encontrados
+                if conteo['estado'].upper() != 'TERCER_CONTEO'
+            ]
+            if estados_invalidos:
+                return JsonResponse({
+                    'success': False,
+                    'message': 'Solo se puede generar acta final con conteos en estado TERCER_CONTEO',
+                    'conteos_invalidos': estados_invalidos,
+                }, status=400)
+
+            centros = {conteo['centro'].upper() for conteo in conteos_encontrados}
+            almacenes = {conteo['almacen'].upper() for conteo in conteos_encontrados}
+
+            if len(centros) > 1 or len(almacenes) > 1:
+                return JsonResponse({
+                    'success': False,
+                    'message': 'No se puede generar el acta final: todos los conteos seleccionados deben corresponder al mismo centro y al mismo almacén.',
+                    'conteos': conteos_encontrados,
+                }, status=400)
+
+            return JsonResponse({
+                'success': True,
+                'message': 'Validación exitosa. Los conteos seleccionados corresponden al mismo centro y almacén.',
+                'centro': conteos_encontrados[0]['centro'],
+                'almacen': conteos_encontrados[0]['almacen'],
+                'total_conteos': len(conteos_encontrados),
+            })
+
+        filtros = data.get('filtros', {})
     elif request.method == 'GET':
+        filtros = {}
         filtros['almacen'] = request.GET.get('almacen', '').strip()
+    else:
+        filtros = {}
 
     with connection.cursor() as cursor:
         query = """
@@ -5959,6 +6037,29 @@ def acta_final(request):
 
     estadisticas = {'total': len(conteos)}
 
+    # Consultar actas finales ya generadas
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT acta_final_id, numeros_conteo, centro, almacen, estado,
+                   fecha_creacion, usuario_creacion
+            FROM acta_final_tbl
+            ORDER BY fecha_creacion DESC
+        """)
+        actas_rows = cursor.fetchall()
+
+    actas_finales = [
+        {
+            'acta_final_id': r[0],
+            'numeros_conteo': r[1],
+            'centro': r[2],
+            'almacen': r[3],
+            'estado': r[4],
+            'fecha_creacion': r[5].strftime('%b. %d, %Y') if r[5] else '-',
+            'usuario_creacion': r[6],
+        }
+        for r in actas_rows
+    ]
+
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({'conteos': conteos, 'estadisticas': estadisticas})
 
@@ -5969,6 +6070,7 @@ def acta_final(request):
         'estadisticas': estadisticas,
         'almacenes_disponibles': almacenes_disponibles,
         'filtro_almacen': filtros.get('almacen', ''),
+        'actas_finales': actas_finales,
     }
     return render(request, 'inventario/acta_final.html', context)
 
@@ -7171,3 +7273,1032 @@ def eliminar_acta_preliminar(request, piqueo_id):
             'success': False,
             'message': f'Error al eliminar acta preliminar: {str(e)}'
         }, status=500)
+
+
+# ======================== ACTA FINAL ========================
+
+@csrf_exempt
+def formulario_acta_final(request):
+    """
+    Vista para mostrar el formulario de acta final con datos agregados de los conteos seleccionados.
+    Recibe numeros_conteo como query param GET (separados por coma).
+    """
+    if 'usuario' not in request.session:
+        return redirect('login')
+
+    perfil_completo = request.session.get('perfil_seleccionado', {})
+    perfil_nombre = perfil_completo.get('nombre', '') if isinstance(perfil_completo, dict) else ''
+    usuario_sesion = request.session.get('usuario', {})
+    perfiles_permitidos = ["ADMINISTRATIVO", "ADMINISTRADOR DE INVENTARIO"]
+    if perfil_nombre not in perfiles_permitidos:
+        messages.error(request, 'No tiene permisos para acceder a Acta Final')
+        return redirect('dashboard')
+
+    numeros_raw = request.GET.get('numeros_conteo', '').strip()
+    if not numeros_raw:
+        messages.error(request, 'No se especificaron conteos para el acta final')
+        return redirect('acta_final')
+
+    numeros_conteo = [n.strip() for n in numeros_raw.split(',') if n.strip()]
+    numeros_conteo = list(dict.fromkeys(numeros_conteo))
+
+    try:
+        placeholders = ','.join(['%s'] * len(numeros_conteo))
+
+        with connection.cursor() as cursor:
+            # Validar que todos sean TERCER_CONTEO y mismo centro/almacen
+            cursor.execute(f"""
+                SELECT piqueo_id, numero_conteo, centro, almacen
+                FROM INV_PIQUEOS_INVENTARIO_TBL
+                WHERE numero_conteo IN ({placeholders})
+                AND UPPER(estado) = 'TERCER_CONTEO'
+            """, numeros_conteo)
+            piqueos = [
+                {'piqueo_id': r[0], 'numero_conteo': r[1],
+                 'centro': (r[2] or '').strip(), 'almacen': (r[3] or '').strip()}
+                for r in cursor.fetchall()
+            ]
+
+        if not piqueos:
+            messages.error(request, 'No se encontraron conteos válidos en estado TERCER_CONTEO')
+            return redirect('acta_final')
+
+        piqueo_ids = [p['piqueo_id'] for p in piqueos]
+        piqueo_ids_ph = ','.join(['%s'] * len(piqueo_ids))
+
+        with connection.cursor() as cursor:
+            # Verificar si ya existe acta final para estos conteos
+            cursor.execute("""
+                SELECT acta_final_id FROM acta_final_tbl
+                WHERE numeros_conteo = %s
+            """, [','.join(numeros_conteo)])
+            existing = cursor.fetchone()
+            acta_final_id_existente = existing[0] if existing else None
+
+            if acta_final_id_existente:
+                # Cargar datos guardados
+                cursor.execute("""
+                    SELECT
+                        acta_final_id, numeros_conteo, centro, almacen, empresa, pais, concepto, tienda,
+                        fecha_primer_conteo, fecha_ultimo_conteo,
+                        jefe_tienda, subjefe_tienda, auxiliar_ventas, auxiliar_caja,
+                        auxiliar_bodega, auxiliar_operativo, asistente_opertaivo_inventario,
+                        jefe_inventarios, auditor_interno, contado, gerente_regional, supervisor_comercial,
+                        stock_sap_descripcion_calzado, stock_sap_valor_calzado,
+                        stock_sap_descripcion_ropa, stock_sap_valor_ropa,
+                        stock_sap_descripcion_accesorio, stock_sap_valor_accesorio,
+                        stock_sap_descripcion_fundas, stock_sap_valor_fundas,
+                        stock_sap_descripcion_otros, stock_sap_valor_otros, stock_sap_total,
+                        cantidad_marcas, cantidad_lineas, cantidad_items,
+                        cantidad_items_faltantes, cantidad_items_sobrantes,
+                        valor_items_faltantes, valor_items_sobrantes,
+                        codigo_inventario, lineas_diferencias, hora_genero_informe_inven_sap,
+                        toma_fisica_grupo, confirmo_encerado_guia_remi,
+                        fecha_toma_fisica_anterior, cantidad_item_ultimo_inv,
+                        numero_toma_fisica_anterior, cantidad_item_acumula_anual,
+                        valor_efectivo, valor_facturas, valor_cheques, fondo_caja, fondo_sueltos, total,
+                        sucursal, ultima_fact_caja1, ultima_fact_caja2, ultima_fact_caja3,
+                        ultima_fact_caja4, ultima_fact_caja5, ultimo_doc_guia_remision, ultimo_doc_nota_credit,
+                        cantidad_toma_revisada, porcentaje_inventario, total_items_por_inventariar,
+                        horas_suspendidas_atencion_cliente, total_gastos_ejecucion_toma_fisica,
+                        cargo_1, nombre_cargo_1, cargo_2, nombre_cargo_2,
+                        cargo_3, nombre_cargo_3, cargo_4, nombre_cargo_4,
+                        cargo_5, nombre_cargo_5, cargo_6, nombre_cargo_6,
+                        cargo_7, nombre_cargo_7, cargo_8, nombre_cargo_8, sap_hcm_mcu
+                    FROM acta_final_tbl WHERE acta_final_id = %s
+                """, [acta_final_id_existente])
+                row = cursor.fetchone()
+                r = row
+                datos_conteo = {
+                    'acta_final_id': r[0], 'numeros_conteo': r[1], 'numeros_conteo_lista': numeros_conteo,
+                    'centro': r[2], 'almacen': r[3], 'empresa': r[4], 'pais': r[5] or '',
+                    'concepto': r[6] or '', 'tienda': r[7] or '',
+                    'fecha_primer_conteo': r[8].strftime('%Y-%m-%d') if r[8] else '',
+                    'fecha_segundo_conteo': r[9].strftime('%Y-%m-%d') if r[9] else '',
+                    'jefe_tienda': r[10] or 0, 'subjefe_tienda': r[11] or 0,
+                    'auxiliar_ventas': r[12] or 0, 'auxiliar_caja': r[13] or 0,
+                    'auxiliar_bodega': r[14] or 0, 'auxiliar_operativo': r[15] or 0,
+                    'asistente_opertaivo_inventario': r[16] or 0,
+                    'jefe_inventarios': r[17] or 0, 'auditor_interno': r[18] or 0,
+                    'contado': r[19] or 0, 'gerente_regional': r[20] or 0,
+                    'supervisor_comercial': r[21] or 0,
+                    'stock_sap_items': [
+                        {'tipo': r[22] or 'CALZADO', 'valor': r[23] or 0},
+                        {'tipo': r[24] or 'ROPA', 'valor': r[25] or 0},
+                        {'tipo': r[26] or 'ACCESORIO', 'valor': r[27] or 0},
+                        {'tipo': r[28] or 'FUNDAS', 'valor': r[29] or 0},
+                        {'tipo': r[30] or 'OTROS', 'valor': r[31] or 0},
+                    ],
+                    'stock_sap_total': r[32] or 0,
+                    'cantidad_marcas': r[33] or 0, 'cantidad_lineas': r[34] or 0,
+                    'cantidad_items': r[35] or 0, 'cantidad_items_faltantes': r[36] or 0,
+                    'cantidad_items_sobrantes': r[37] or 0,
+                    'valor_items_faltantes': r[38] or 0, 'valor_items_sobrantes': r[39] or 0,
+                    'codigo_inventario': r[40] or '', 'lineas_diferencias': r[41] or 0,
+                    'hora_genero_informe_inven_sap': '',
+                    'toma_fisica_grupo': r[43] or '', 'confirmo_encerado_guia_remi': r[44] or 'NO',
+                    'fecha_toma_fisica_anterior': r[45].strftime('%Y-%m-%d') if r[45] else '',
+                    'cantidad_item_ultimo_inv': r[46] or 0,
+                    'numero_toma_fisica_anterior': r[47] or '',
+                    'cantidad_item_acumula_anual': r[48] or 0,
+                    'valor_efectivo': r[49] or 0, 'valor_facturas': r[50] or 0,
+                    'valor_cheques': r[51] or 0, 'fondo_caja': r[52] or 0,
+                    'fondo_sueltos': r[53] or 0, 'total': r[54] or 0,
+                    'sucursal': r[55] or '', 'ultima_fact_caja1': r[56] or '',
+                    'ultima_fact_caja2': r[57] or '', 'ultima_fact_caja3': r[58] or '',
+                    'ultima_fact_caja4': r[59] or '', 'ultima_fact_caja5': r[60] or '',
+                    'ultimo_doc_guia_remision': r[61] or '', 'ultimo_doc_nota_credit': r[62] or '',
+                    'cantidad_toma_revisada': r[63] or 0,
+                    'porcentaje_inventariado_hoy': r[64] or 0,
+                    'total_items_por_inventariar': r[65] or 0,
+                    'horas_suspendidas_atencion': r[66] or 0,
+                    'total_gastos_ejecucion': r[67] or 0,
+                    'gerente_operaciones_cargo': r[68] or '', 'gerente_operaciones_firma': r[69] or '',
+                    'jefe_inventarios_cargo': r[70] or '', 'jefe_inventarios_firma': r[71] or '',
+                    'supervisor_comercial_cargo': r[72] or '', 'supervisor_comercial_firma': r[73] or '',
+                    'asistente_control_inventarios_cargo': r[74] or '', 'asistente_control_inventarios_firma': r[75] or '',
+                    'jefe_tienda_cargo': r[76] or '', 'jefe_tienda_firma': r[77] or '',
+                    'sub_jefe_tienda_cargo': r[78] or '', 'sub_jefe_tienda_firma': r[79] or '',
+                    'contador_general_cargo': r[80] or '', 'contador_general_firma': r[81] or '',
+                    'auditor_interno_cargo': r[82] or '', 'auditor_interno_firma': r[83] or '',
+                    'sap_hcm_mcu': r[84] or '',
+                    'anio_anterior': timezone.now().year - 1,
+                }
+            else:
+                # Agregar datos de acta_preliminar_tbl para los piqueo_ids seleccionados
+                cursor.execute(f"""
+                    SELECT
+                        SUM(NVL(jefe_tienda,0)), SUM(NVL(subjefe_tienda,0)),
+                        SUM(NVL(auxiliar_ventas,0)), SUM(NVL(auxiliar_caja,0)),
+                        SUM(NVL(auxiliar_bodega,0)), SUM(NVL(auxiliar_operativo,0)),
+                        SUM(NVL(asistente_opertaivo_inventario,0)), SUM(NVL(jefe_inventarios,0)),
+                        SUM(NVL(auditor_interno,0)), SUM(NVL(contado,0)),
+                        SUM(NVL(gerente_regional,0)), SUM(NVL(supervisor_comercial,0)),
+                        SUM(NVL(cantidad_marcas,0)), SUM(NVL(cantidad_lineas,0)),
+                        SUM(NVL(cantidad_items,0)), SUM(NVL(cantidad_items_faltantes,0)),
+                        SUM(NVL(cantidad_items_sobrantes,0)),
+                        SUM(NVL(valor_items_faltantes,0)), SUM(NVL(valor_items_sobrantes,0)),
+                        SUM(NVL(lineas_diferencias,0)),
+                        SUM(NVL(valor_efectivo,0)), SUM(NVL(valor_facturas,0)),
+                        SUM(NVL(valor_cheques,0)), SUM(NVL(fondo_caja,0)), SUM(NVL(fondo_sueltos,0)),
+                        SUM(NVL(total,0)), SUM(NVL(cantidad_toma_revisada,0)),
+                        SUM(NVL(total_gastos_ejecucion_toma_fisica,0)),
+                        MIN(fecha_primer_conteo), MAX(fecha_segundo_conteo),
+                        MAX(empresa), MAX(centro), MAX(almacen)
+                    FROM acta_preliminar_tbl
+                    WHERE piqueo_id IN ({piqueo_ids_ph})
+                """, piqueo_ids)
+                agg = cursor.fetchone()
+
+                # Datos del registro más reciente para campos no sumables
+                cursor.execute(f"""
+                    SELECT
+                        stock_sap_descripcion_calzado, stock_sap_valor_calzado,
+                        stock_sap_descripcion_ropa, stock_sap_valor_ropa,
+                        stock_sap_descripcion_accesorio, stock_sap_valor_accesorio,
+                        stock_sap_descripcion_fundas, stock_sap_valor_fundas,
+                        stock_sap_descripcion_otros, stock_sap_valor_otros, stock_sap_total,
+                        sucursal, codigo_inventario, toma_fisica_grupo,
+                        fecha_toma_fisica_anterior, cantidad_item_ultimo_inv,
+                        numero_toma_fisica_anterior, cantidad_item_acumula_anual,
+                        concepto, tienda, pais, empresa, confirmo_encerado_guia_remi,
+                        porcentaje_inventario, total_items_por_inventariar
+                    FROM acta_preliminar_tbl
+                    WHERE piqueo_id = (SELECT MAX(piqueo_id) FROM acta_preliminar_tbl
+                                      WHERE piqueo_id IN ({piqueo_ids_ph}))
+                """, piqueo_ids)
+                lat = cursor.fetchone()
+
+                def _s(v, d=0):
+                    return v if v is not None else d
+
+                empresa_val = _s(agg[30], '') if agg else usuario_sesion.get('empresa', 'SUPERDEPORTE')
+                centro_val = _s(agg[31], '') if agg else (piqueos[0]['centro'] if piqueos else '')
+                almacen_val = _s(agg[32], '') if agg else (piqueos[0]['almacen'] if piqueos else '')
+
+                numeros_ph = ','.join(['%s'] * len(numeros_conteo))
+                cursor.execute(f"""
+                    SELECT
+                        COUNT(DISTINCT marca) AS cantidad_marcas,
+                        COUNT(DISTINCT SUBSTR(grupo_articulos, 7, 3)) AS cantidad_lineas,
+                        SUM(NVL(conteo_4, 0)) AS cantidad_items,
+                        SUM(CASE WHEN estado_comparacion_4 = 'FALTANTE' THEN NVL(diferencia_4, 0) ELSE 0 END) AS cantidad_items_faltantes,
+                        ABS(SUM(CASE WHEN estado_comparacion_4 = 'SOBRANTE' THEN NVL(diferencia_4, 0) ELSE 0 END)) AS cantidad_items_sobrantes,
+                        ABS(SUM(CASE WHEN estado_comparacion_4 = 'FALTANTE' THEN NVL(diferencia_4, 0) * NVL(pvp, 0) ELSE 0 END)) AS valor_items_faltantes,
+                        SUM(CASE WHEN estado_comparacion_4 = 'SOBRANTE' THEN NVL(diferencia_4, 0) * NVL(pvp, 0) ELSE 0 END) AS valor_items_sobrantes,
+                        MAX(fecha_conteo_4) AS fecha_ultimo_conteo,
+                        MAX(fecha_precio) AS hora_informe_sap,
+                        SUM(NVL(sap_4, 0)) AS stock_sap_total
+                    FROM inv_inventario_fisico_vs_sistema
+                    WHERE numero_conteo IN ({numeros_ph})
+                """, numeros_conteo)
+                final_inv = cursor.fetchone()
+
+                cantidad_marcas_final = _s(final_inv[0], 0) if final_inv else 0
+                cantidad_lineas_final = _s(final_inv[1], 0) if final_inv else 0
+                cantidad_items_final = _s(final_inv[2], 0) if final_inv else 0
+                cantidad_items_faltantes_final = _s(final_inv[3], 0) if final_inv else 0
+                cantidad_items_sobrantes_final = _s(final_inv[4], 0) if final_inv else 0
+                valor_items_faltantes_final = _s(final_inv[5], 0) if final_inv else 0
+                valor_items_sobrantes_final = _s(final_inv[6], 0) if final_inv else 0
+                fecha_ultimo_conteo_final = final_inv[7] if final_inv else None
+                hora_informe_sap_final = final_inv[8] if final_inv else None
+                stock_sap_total_final = _s(final_inv[9], 0) if final_inv else 0
+                lineas_diferencias_final = int(cantidad_items_faltantes_final or 0) + int(cantidad_items_sobrantes_final or 0)
+
+                # Calcular % inventariado y total por inventariar
+                porcentaje = _s(lat[23], 0) if lat else 0
+                total_inv = _s(lat[24], 0) if lat else 0
+                if cantidad_items_final and stock_sap_total_final:
+                    try:
+                        p = (float(cantidad_items_final) / float(stock_sap_total_final)) * 100
+                        porcentaje = round(p, 2)
+                        total_inv = max(0, float(stock_sap_total_final) - float(cantidad_items_final))
+                    except Exception:
+                        pass
+
+                datos_conteo = {
+                    'acta_final_id': None,
+                    'numeros_conteo': ','.join(numeros_conteo),
+                    'numeros_conteo_lista': numeros_conteo,
+                    'centro': centro_val,
+                    'almacen': almacen_val,
+                    'empresa': empresa_val,
+                    'pais': (lat[20] or '') if lat else '',
+                    'concepto': (lat[18] or '') if lat else '',
+                    'tienda': (lat[19] or '') if lat else '',
+                    'fecha_primer_conteo': agg[28].strftime('%Y-%m-%d') if (agg and agg[28]) else '',
+                    'fecha_segundo_conteo': fecha_ultimo_conteo_final.strftime('%Y-%m-%d') if fecha_ultimo_conteo_final else (agg[29].strftime('%Y-%m-%d') if (agg and agg[29]) else ''),
+                    'jefe_tienda': _s(agg[0], 0) if agg else 0,
+                    'subjefe_tienda': _s(agg[1], 0) if agg else 0,
+                    'auxiliar_ventas': _s(agg[2], 0) if agg else 0,
+                    'auxiliar_caja': _s(agg[3], 0) if agg else 0,
+                    'auxiliar_bodega': _s(agg[4], 0) if agg else 0,
+                    'auxiliar_operativo': _s(agg[5], 0) if agg else 0,
+                    'asistente_opertaivo_inventario': _s(agg[6], 0) if agg else 0,
+                    'jefe_inventarios': _s(agg[7], 0) if agg else 0,
+                    'auditor_interno': _s(agg[8], 0) if agg else 0,
+                    'contado': _s(agg[9], 0) if agg else 0,
+                    'gerente_regional': _s(agg[10], 0) if agg else 0,
+                    'supervisor_comercial': _s(agg[11], 0) if agg else 0,
+                    'stock_sap_items': [
+                        {'tipo': (lat[0] or 'CALZADO') if lat else 'CALZADO', 'valor': _s(lat[1], 0) if lat else 0},
+                        {'tipo': (lat[2] or 'ROPA') if lat else 'ROPA', 'valor': _s(lat[3], 0) if lat else 0},
+                        {'tipo': (lat[4] or 'ACCESORIO') if lat else 'ACCESORIO', 'valor': _s(lat[5], 0) if lat else 0},
+                        {'tipo': (lat[6] or 'FUNDAS') if lat else 'FUNDAS', 'valor': _s(lat[7], 0) if lat else 0},
+                        {'tipo': (lat[8] or 'OTROS') if lat else 'OTROS', 'valor': _s(lat[9], 0) if lat else 0},
+                    ],
+                    'stock_sap_total': stock_sap_total_final,
+                    'cantidad_marcas': cantidad_marcas_final,
+                    'cantidad_lineas': cantidad_lineas_final,
+                    'cantidad_items': cantidad_items_final,
+                    'cantidad_items_faltantes': cantidad_items_faltantes_final,
+                    'cantidad_items_sobrantes': cantidad_items_sobrantes_final,
+                    'valor_items_faltantes': valor_items_faltantes_final,
+                    'valor_items_sobrantes': valor_items_sobrantes_final,
+                    'codigo_inventario': (lat[12] or '') if lat else '',
+                    'lineas_diferencias': lineas_diferencias_final,
+                    'hora_genero_informe_inven_sap': hora_informe_sap_final.strftime('%Y-%m-%dT%H:%M') if hora_informe_sap_final else '',
+                    'toma_fisica_grupo': (lat[13] or '') if lat else '',
+                    'confirmo_encerado_guia_remi': (lat[22] or 'NO') if lat else 'NO',
+                    'fecha_toma_fisica_anterior': lat[14].strftime('%Y-%m-%d') if (lat and lat[14]) else '',
+                    'cantidad_item_ultimo_inv': _s(lat[15], 0) if lat else 0,
+                    'numero_toma_fisica_anterior': (lat[16] or '') if lat else '',
+                    'cantidad_item_acumula_anual': _s(lat[17], 0) if lat else 0,
+                    'valor_efectivo': _s(agg[20], 0) if agg else 0,
+                    'valor_facturas': _s(agg[21], 0) if agg else 0,
+                    'valor_cheques': _s(agg[22], 0) if agg else 0,
+                    'fondo_caja': _s(agg[23], 0) if agg else 0,
+                    'fondo_sueltos': _s(agg[24], 0) if agg else 0,
+                    'total': _s(agg[25], 0) if agg else 0,
+                    'sucursal': (lat[11] or '') if lat else '',
+                    'ultima_fact_caja1': '', 'ultima_fact_caja2': '',
+                    'ultima_fact_caja3': '', 'ultima_fact_caja4': '', 'ultima_fact_caja5': '',
+                    'ultimo_doc_guia_remision': '', 'ultimo_doc_nota_credit': '',
+                    'cantidad_toma_revisada': _s(agg[26], 0) if agg else 0,
+                    'porcentaje_inventariado_hoy': porcentaje,
+                    'total_items_por_inventariar': total_inv,
+                    'horas_suspendidas_atencion': 0,
+                    'total_gastos_ejecucion': _s(agg[27], 0) if agg else 0,
+                    'sap_hcm_mcu': '',
+                    'gerente_operaciones_cargo': '', 'gerente_operaciones_firma': '',
+                    'jefe_inventarios_cargo': '', 'jefe_inventarios_firma': '',
+                    'supervisor_comercial_cargo': '', 'supervisor_comercial_firma': '',
+                    'asistente_control_inventarios_cargo': '', 'asistente_control_inventarios_firma': '',
+                    'jefe_tienda_cargo': '', 'jefe_tienda_firma': '',
+                    'sub_jefe_tienda_cargo': '', 'sub_jefe_tienda_firma': '',
+                    'contador_general_cargo': '', 'contador_general_firma': '',
+                    'auditor_interno_cargo': '', 'auditor_interno_firma': '',
+                    'anio_anterior': timezone.now().year - 1,
+                }
+
+    except Exception as e:
+        print(f"❌ Error al cargar datos para acta final: {e}")
+        import traceback
+        traceback.print_exc()
+        messages.error(request, f'Error al cargar los datos: {str(e)}')
+        return redirect('acta_final')
+
+    context = {
+        'usuario': request.session['usuario'],
+        'perfil': perfil_nombre,
+        'datos_conteo': datos_conteo,
+    }
+    return render(request, 'inventario/formulario_acta_final.html', context)
+
+
+@csrf_exempt
+def guardar_acta_final(request):
+    """
+    Vista para guardar el acta final en acta_final_tbl.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Método no permitido'}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        usuario_sesion = request.session.get('usuario', {})
+        cedula = usuario_sesion.get('cedula', '') if isinstance(usuario_sesion, dict) else ''
+
+        numeros_conteo_raw = data.get('numeros_conteo', '')
+        centro_val = data.get('centro', '').strip()
+        almacen_val = data.get('almacen', '').strip()
+
+        if not numeros_conteo_raw or not centro_val or not almacen_val:
+            return JsonResponse({'success': False, 'message': 'Faltan campos obligatorios (numeros_conteo, centro, almacen)'})
+
+        numeros_lista = [n.strip() for n in numeros_conteo_raw.split(',') if n.strip()]
+
+        def get_value(key, default=None):
+            val = data.get(key, default)
+            return val if val not in ('', None) else default
+
+        def get_number(key, default=0):
+            val = get_value(key, default)
+            if val is None or val == '':
+                return default
+            try:
+                s = str(val).strip().replace(' ', '').replace(',', '')
+                return float(s) if '.' in s else int(s)
+            except Exception:
+                return default
+
+        def format_date_oracle(fecha_str, include_time=True):
+            if not fecha_str:
+                return None
+            fecha_str = str(fecha_str).replace('T', ' ')
+            if include_time and len(fecha_str) == 10:
+                fecha_str += ' 00:00:00'
+            if include_time and len(fecha_str) == 16:
+                fecha_str += ':00'
+            return fecha_str
+
+        stock_sap_descripcion_calzado = get_value('stock_sap_descripcion_1', 'CALZADO')
+        stock_sap_valor_calzado = get_number('stock_sap_valor_1', 0)
+        stock_sap_descripcion_ropa = get_value('stock_sap_descripcion_2', 'ROPA')
+        stock_sap_valor_ropa = get_number('stock_sap_valor_2', 0)
+        stock_sap_descripcion_accesorio = get_value('stock_sap_descripcion_3', 'ACCESORIO')
+        stock_sap_valor_accesorio = get_number('stock_sap_valor_3', 0)
+        stock_sap_descripcion_fundas = get_value('stock_sap_descripcion_4', 'FUNDAS')
+        stock_sap_valor_fundas = get_number('stock_sap_valor_4', 0)
+        stock_sap_descripcion_otros = get_value('stock_sap_descripcion_5', 'OTROS')
+        stock_sap_valor_otros = get_number('stock_sap_valor_5', 0)
+        stock_sap_total = get_number('stock_sap_total', 0)
+
+        fecha_primer_conteo_fmt = format_date_oracle(get_value('fecha_primer_conteo'))
+        fecha_ultimo_conteo_fmt = format_date_oracle(get_value('fecha_segundo_conteo'))
+        fecha_toma_anterior_fmt = format_date_oracle(get_value('fecha_toma_fisica_anterior'), include_time=False)
+
+        with connection.cursor() as cursor:
+            acta_final_id_existente = None
+            cursor.execute("SELECT acta_final_id FROM acta_final_tbl WHERE numeros_conteo = %s", [numeros_conteo_raw])
+            row = cursor.fetchone()
+            if row:
+                acta_final_id_existente = row[0]
+
+            params = [
+                numeros_conteo_raw, centro_val, almacen_val,
+                get_value('empresa', 'SUPERDEPORTE'), get_value('pais', ''), get_value('concepto', ''),
+                get_value('tienda', almacen_val),
+                fecha_primer_conteo_fmt, fecha_ultimo_conteo_fmt,
+                get_number('jefe_tienda', 0), get_number('subjefe_tienda', 0),
+                get_number('auxiliar_ventas', 0), get_number('auxiliar_caja', 0),
+                get_number('auxiliar_bodega', 0), get_number('auxiliar_operativo', 0),
+                get_number('asistente_opertaivo_inventario', 0), get_number('jefe_inventarios', 0),
+                get_number('auditor_interno', 0), get_number('contado', 0),
+                get_number('gerente_regional', 0), get_number('supervisor_comercial', 0),
+                stock_sap_descripcion_calzado, stock_sap_valor_calzado,
+                stock_sap_descripcion_ropa, stock_sap_valor_ropa,
+                stock_sap_descripcion_accesorio, stock_sap_valor_accesorio,
+                stock_sap_descripcion_fundas, stock_sap_valor_fundas,
+                stock_sap_descripcion_otros, stock_sap_valor_otros, stock_sap_total,
+                get_number('cantidad_marcas', 0), get_number('cantidad_lineas', 0),
+                get_number('cantidad_items', 0), get_number('cantidad_items_faltantes', 0),
+                get_number('cantidad_items_sobrantes', 0),
+                get_number('valor_items_faltantes', 0), get_number('valor_items_sobrantes', 0),
+                get_value('codigo_inventario'), get_value('lineas_diferencias'),
+                get_value('toma_fisica_grupo'), get_value('confirmo_encerado_guia_remi', 'NO'),
+                fecha_toma_anterior_fmt, get_number('cantidad_item_ultimo_inv', 0),
+                get_value('numero_toma_fisica_anterior', ''), get_number('cantidad_item_acumula_anual', 0),
+                get_number('valor_efectivo', 0), get_number('valor_facturas', 0),
+                get_number('valor_cheques', 0), get_number('fondo_caja', 0),
+                get_number('fondo_sueltos', 0), get_number('total', 0),
+                get_value('sucursal'), get_value('ultima_fact_caja1'), get_value('ultima_fact_caja2'),
+                get_value('ultima_fact_caja3'), get_value('ultima_fact_caja4'), get_value('ultima_fact_caja5'),
+                get_value('ultimo_doc_guia_remision'), get_value('ultimo_doc_nota_credit'),
+                get_number('horas_suspendidas_atencion', 0), get_number('total_gastos_ejecucion', 0),
+                get_number('total_items_por_inventariar', 0),
+                get_number('cantidad_toma_revisada', 0), get_number('porcentaje_inventariado_hoy', 0),
+                get_value('sap_hcm_mcu', ''),
+                get_value('gerente_operaciones_cargo', '').upper() if get_value('gerente_operaciones_cargo') else '',
+                get_value('gerente_operaciones_firma', '').upper() if get_value('gerente_operaciones_firma') else '',
+                get_value('jefe_inventarios_cargo', '').upper() if get_value('jefe_inventarios_cargo') else '',
+                get_value('jefe_inventarios_firma', '').upper() if get_value('jefe_inventarios_firma') else '',
+                get_value('supervisor_comercial_cargo', '').upper() if get_value('supervisor_comercial_cargo') else '',
+                get_value('supervisor_comercial_firma', '').upper() if get_value('supervisor_comercial_firma') else '',
+                get_value('asistente_control_inventarios_cargo', '').upper() if get_value('asistente_control_inventarios_cargo') else '',
+                get_value('asistente_control_inventarios_firma', '').upper() if get_value('asistente_control_inventarios_firma') else '',
+                get_value('jefe_tienda_cargo', '').upper() if get_value('jefe_tienda_cargo') else '',
+                get_value('jefe_tienda_firma', '').upper() if get_value('jefe_tienda_firma') else '',
+                get_value('sub_jefe_tienda_cargo', '').upper() if get_value('sub_jefe_tienda_cargo') else '',
+                get_value('sub_jefe_tienda_firma', '').upper() if get_value('sub_jefe_tienda_firma') else '',
+                get_value('contador_general_cargo', '').upper() if get_value('contador_general_cargo') else '',
+                get_value('contador_general_firma', '').upper() if get_value('contador_general_firma') else '',
+                get_value('auditor_interno_cargo', '').upper() if get_value('auditor_interno_cargo') else '',
+                get_value('auditor_interno_firma', '').upper() if get_value('auditor_interno_firma') else '',
+                cedula,
+            ]
+
+            if acta_final_id_existente:
+                cursor.execute("""
+                    UPDATE acta_final_tbl SET
+                        centro=%s, almacen=%s, empresa=%s, pais=%s, concepto=%s, tienda=%s,
+                        fecha_primer_conteo=TO_DATE(%s,'YYYY-MM-DD HH24:MI:SS'),
+                        fecha_ultimo_conteo=TO_DATE(%s,'YYYY-MM-DD HH24:MI:SS'),
+                        jefe_tienda=%s, subjefe_tienda=%s, auxiliar_ventas=%s, auxiliar_caja=%s,
+                        auxiliar_bodega=%s, auxiliar_operativo=%s, asistente_opertaivo_inventario=%s,
+                        jefe_inventarios=%s, auditor_interno=%s, contado=%s, gerente_regional=%s,
+                        supervisor_comercial=%s,
+                        stock_sap_descripcion_calzado=%s, stock_sap_valor_calzado=%s,
+                        stock_sap_descripcion_ropa=%s, stock_sap_valor_ropa=%s,
+                        stock_sap_descripcion_accesorio=%s, stock_sap_valor_accesorio=%s,
+                        stock_sap_descripcion_fundas=%s, stock_sap_valor_fundas=%s,
+                        stock_sap_descripcion_otros=%s, stock_sap_valor_otros=%s, stock_sap_total=%s,
+                        cantidad_marcas=%s, cantidad_lineas=%s, cantidad_items=%s,
+                        cantidad_items_faltantes=%s, cantidad_items_sobrantes=%s,
+                        valor_items_faltantes=%s, valor_items_sobrantes=%s,
+                        codigo_inventario=%s, lineas_diferencias=%s, toma_fisica_grupo=%s,
+                        confirmo_encerado_guia_remi=%s,
+                        fecha_toma_fisica_anterior=TO_DATE(%s,'YYYY-MM-DD'),
+                        cantidad_item_ultimo_inv=%s, numero_toma_fisica_anterior=%s,
+                        cantidad_item_acumula_anual=%s, valor_efectivo=%s, valor_facturas=%s,
+                        valor_cheques=%s, fondo_caja=%s, fondo_sueltos=%s, total=%s,
+                        sucursal=%s, ultima_fact_caja1=%s, ultima_fact_caja2=%s,
+                        ultima_fact_caja3=%s, ultima_fact_caja4=%s, ultima_fact_caja5=%s,
+                        ultimo_doc_guia_remision=%s, ultimo_doc_nota_credit=%s,
+                        horas_suspendidas_atencion_cliente=%s, total_gastos_ejecucion_toma_fisica=%s,
+                        total_items_por_inventariar=%s, cantidad_toma_revisada=%s, porcentaje_inventario=%s,
+                        sap_hcm_mcu=%s,
+                        cargo_1=%s, nombre_cargo_1=%s, cargo_2=%s, nombre_cargo_2=%s,
+                        cargo_3=%s, nombre_cargo_3=%s, cargo_4=%s, nombre_cargo_4=%s,
+                        cargo_5=%s, nombre_cargo_5=%s, cargo_6=%s, nombre_cargo_6=%s,
+                        cargo_7=%s, nombre_cargo_7=%s, cargo_8=%s, nombre_cargo_8=%s
+                    WHERE acta_final_id = %s
+                """, params[1:-1] + [acta_final_id_existente])
+                acta_id = acta_final_id_existente
+            else:
+                cursor.execute("""
+                    INSERT INTO acta_final_tbl (
+                        numeros_conteo, centro, almacen, empresa, pais, concepto, tienda,
+                        fecha_primer_conteo, fecha_ultimo_conteo,
+                        jefe_tienda, subjefe_tienda, auxiliar_ventas, auxiliar_caja,
+                        auxiliar_bodega, auxiliar_operativo, asistente_opertaivo_inventario,
+                        jefe_inventarios, auditor_interno, contado, gerente_regional, supervisor_comercial,
+                        stock_sap_descripcion_calzado, stock_sap_valor_calzado,
+                        stock_sap_descripcion_ropa, stock_sap_valor_ropa,
+                        stock_sap_descripcion_accesorio, stock_sap_valor_accesorio,
+                        stock_sap_descripcion_fundas, stock_sap_valor_fundas,
+                        stock_sap_descripcion_otros, stock_sap_valor_otros, stock_sap_total,
+                        cantidad_marcas, cantidad_lineas, cantidad_items,
+                        cantidad_items_faltantes, cantidad_items_sobrantes,
+                        valor_items_faltantes, valor_items_sobrantes,
+                        codigo_inventario, lineas_diferencias, toma_fisica_grupo,
+                        confirmo_encerado_guia_remi,
+                        fecha_toma_fisica_anterior,
+                        cantidad_item_ultimo_inv, numero_toma_fisica_anterior,
+                        cantidad_item_acumula_anual, valor_efectivo, valor_facturas,
+                        valor_cheques, fondo_caja, fondo_sueltos, total,
+                        sucursal, ultima_fact_caja1, ultima_fact_caja2,
+                        ultima_fact_caja3, ultima_fact_caja4, ultima_fact_caja5,
+                        ultimo_doc_guia_remision, ultimo_doc_nota_credit,
+                        horas_suspendidas_atencion_cliente, total_gastos_ejecucion_toma_fisica,
+                        total_items_por_inventariar, cantidad_toma_revisada, porcentaje_inventario,
+                        sap_hcm_mcu,
+                        cargo_1, nombre_cargo_1, cargo_2, nombre_cargo_2,
+                        cargo_3, nombre_cargo_3, cargo_4, nombre_cargo_4,
+                        cargo_5, nombre_cargo_5, cargo_6, nombre_cargo_6,
+                        cargo_7, nombre_cargo_7, cargo_8, nombre_cargo_8,
+                        estado, usuario_creacion
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s,
+                        TO_DATE(%s,'YYYY-MM-DD HH24:MI:SS'), TO_DATE(%s,'YYYY-MM-DD HH24:MI:SS'),
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        TO_DATE(%s,'YYYY-MM-DD'),
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        'ACTIVO', %s
+                    )
+                """, params)
+
+                cursor.execute("SELECT acta_final_seq.CURRVAL FROM DUAL")
+                acta_id = cursor.fetchone()[0]
+
+            # Actualizar estado de los piqueos a un valor permitido por CHK_INV_PIQUEOS_ESTADO.
+            if numeros_lista:
+                nums_ph = ','.join(['%s'] * len(numeros_lista))
+                cursor.execute(f"""
+                    UPDATE INV_PIQUEOS_INVENTARIO_TBL
+                    SET estado = 'ACTA_TOMA_FISICA'
+                    WHERE numero_conteo IN ({nums_ph})
+                """, numeros_lista)
+
+            connection.commit()
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Acta final guardada exitosamente.',
+            'acta_final_id': acta_id,
+        })
+
+    except Exception as e:
+        print(f"❌ Error al guardar acta final: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        return JsonResponse({'success': False, 'message': f'Error al guardar acta final: {str(e)}'}, status=500)
+
+
+@csrf_exempt
+def eliminar_acta_final(request, acta_final_id):
+    """
+    Vista para eliminar un registro de acta_final_tbl y revertir los piqueos a TERCER_CONTEO.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Método no permitido'}, status=405)
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT numeros_conteo FROM acta_final_tbl WHERE acta_final_id = %s", [acta_final_id])
+            row = cursor.fetchone()
+            if not row:
+                return JsonResponse({'success': False, 'message': 'No se encontró el acta final'}, status=404)
+
+            numeros_conteo_raw = row[0] or ''
+            numeros_lista = [n.strip() for n in numeros_conteo_raw.split(',') if n.strip()]
+
+            cursor.execute("DELETE FROM acta_final_tbl WHERE acta_final_id = %s", [acta_final_id])
+
+            if numeros_lista:
+                nums_ph = ','.join(['%s'] * len(numeros_lista))
+                cursor.execute(f"""
+                    UPDATE INV_PIQUEOS_INVENTARIO_TBL
+                    SET estado = 'TERCER_CONTEO'
+                    WHERE numero_conteo IN ({nums_ph})
+                """, numeros_lista)
+
+            connection.commit()
+
+        return JsonResponse({
+            'success': True,
+            'message': f'Acta final eliminada. Los conteos volvieron al estado TERCER_CONTEO.'
+        })
+
+    except Exception as e:
+        print(f"❌ Error al eliminar acta final: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        return JsonResponse({'success': False, 'message': f'Error al eliminar acta final: {str(e)}'}, status=500)
+
+
+def imprimir_acta_final_pdf(request, acta_final_id):
+    """
+    Vista para generar PDF del acta final.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    acta_final_id, numeros_conteo, centro, almacen, empresa, pais, concepto, tienda,
+                    fecha_primer_conteo, fecha_ultimo_conteo,
+                    jefe_tienda, subjefe_tienda, auxiliar_ventas, auxiliar_caja,
+                    auxiliar_bodega, auxiliar_operativo, asistente_opertaivo_inventario,
+                    jefe_inventarios, auditor_interno, contado, gerente_regional, supervisor_comercial,
+                    stock_sap_descripcion_calzado, stock_sap_valor_calzado,
+                    stock_sap_descripcion_ropa, stock_sap_valor_ropa,
+                    stock_sap_descripcion_accesorio, stock_sap_valor_accesorio,
+                    stock_sap_descripcion_fundas, stock_sap_valor_fundas,
+                    stock_sap_descripcion_otros, stock_sap_valor_otros, stock_sap_total,
+                    cantidad_marcas, cantidad_lineas, cantidad_items,
+                    cantidad_items_faltantes, cantidad_items_sobrantes,
+                    valor_items_faltantes, valor_items_sobrantes,
+                    codigo_inventario, lineas_diferencias, hora_genero_informe_inven_sap,
+                    toma_fisica_grupo, confirmo_encerado_guia_remi,
+                    fecha_toma_fisica_anterior, cantidad_item_ultimo_inv,
+                    numero_toma_fisica_anterior, cantidad_item_acumula_anual,
+                    valor_efectivo, valor_facturas, valor_cheques, fondo_caja, fondo_sueltos, total,
+                    sucursal, ultima_fact_caja1, ultima_fact_caja2, ultima_fact_caja3,
+                    ultima_fact_caja4, ultima_fact_caja5, ultimo_doc_guia_remision, ultimo_doc_nota_credit,
+                    cargo_1, nombre_cargo_1, cargo_2, nombre_cargo_2,
+                    cargo_3, nombre_cargo_3, cargo_4, nombre_cargo_4,
+                    cargo_5, nombre_cargo_5, cargo_6, nombre_cargo_6,
+                    cargo_7, nombre_cargo_7, cargo_8, nombre_cargo_8, sap_hcm_mcu
+                FROM acta_final_tbl WHERE acta_final_id = %s
+            """, [acta_final_id])
+            row = cursor.fetchone()
+
+        if not row:
+            return JsonResponse({'success': False, 'message': 'No se encontró el acta final'}, status=404)
+
+        datos = {
+            'acta_final_id': row[0], 'numeros_conteo': row[1], 'centro': row[2], 'almacen': row[3],
+            'empresa': row[4], 'pais': row[5] or '', 'concepto': row[6] or '', 'tienda': row[7] or '',
+            'fecha_primer_conteo': row[8], 'fecha_segundo_conteo': row[9],
+            'jefe_tienda': row[10] or 0, 'subjefe_tienda': row[11] or 0,
+            'auxiliar_ventas': row[12] or 0, 'auxiliar_caja': row[13] or 0,
+            'auxiliar_bodega': row[14] or 0, 'auxiliar_operativo': row[15] or 0,
+            'asistente_opertaivo_inventario': row[16] or 0, 'jefe_inventarios': row[17] or 0,
+            'auditor_interno': row[18] or 0, 'contado': row[19] or 0,
+            'gerente_regional': row[20] or 0, 'supervisor_comercial': row[21] or 0,
+            'stock_sap_descripcion_calzado': row[22], 'stock_sap_valor_calzado': row[23],
+            'stock_sap_descripcion_ropa': row[24], 'stock_sap_valor_ropa': row[25],
+            'stock_sap_descripcion_accesorio': row[26], 'stock_sap_valor_accesorio': row[27],
+            'stock_sap_descripcion_fundas': row[28], 'stock_sap_valor_fundas': row[29],
+            'stock_sap_descripcion_otros': row[30], 'stock_sap_valor_otros': row[31],
+            'stock_sap_total': row[32],
+            'cantidad_marcas': row[33], 'cantidad_lineas': row[34], 'cantidad_items': row[35],
+            'cantidad_items_faltantes': row[36], 'cantidad_items_sobrantes': row[37],
+            'valor_items_faltantes': row[38], 'valor_items_sobrantes': row[39],
+            'codigo_inventario': row[40], 'lineas_diferencias': row[41],
+            'hora_genero_informe_inven_sap': row[42],
+            'toma_fisica_grupo': row[43], 'confirmo_encerado_guia_remi': row[44],
+            'fecha_toma_fisica_anterior': row[45], 'cantidad_item_ultimo_inv': row[46],
+            'numero_toma_fisica_anterior': row[47], 'cantidad_item_acumula_anual': row[48],
+            'valor_efectivo': row[49], 'valor_facturas': row[50], 'valor_cheques': row[51],
+            'fondo_caja': row[52], 'fondo_sueltos': row[53], 'total': row[54],
+            'sucursal': row[55], 'ultima_fact_caja1': row[56], 'ultima_fact_caja2': row[57],
+            'ultima_fact_caja3': row[58], 'ultima_fact_caja4': row[59], 'ultima_fact_caja5': row[60],
+            'ultimo_doc_guia_remision': row[61], 'ultimo_doc_nota_credit': row[62],
+            'cargo_1': row[63], 'nombre_cargo_1': row[64], 'cargo_2': row[65], 'nombre_cargo_2': row[66],
+            'cargo_3': row[67], 'nombre_cargo_3': row[68], 'cargo_4': row[69], 'nombre_cargo_4': row[70],
+            'cargo_5': row[71], 'nombre_cargo_5': row[72], 'cargo_6': row[73], 'nombre_cargo_6': row[74],
+            'cargo_7': row[75], 'nombre_cargo_7': row[76], 'cargo_8': row[77], 'nombre_cargo_8': row[78],
+            'sap_hcm_mcu': row[79] or '',
+        }
+
+        from reportlab.lib.colors import black
+        from decimal import Decimal, InvalidOperation
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="acta_final_{acta_final_id}.pdf"'
+
+        p = canvas.Canvas(response, pagesize=A4)
+        width, height = A4
+        margin = 30
+        row_height = 11
+        section_gap = 8
+
+        def draw_cell(x, y, w, h, text, font_size=7, bold=False, center=False, bg_color=None):
+            if bg_color:
+                p.setFillColor(bg_color)
+                p.rect(x, y, w, h, fill=1)
+                p.setFillColor(black)
+            p.setStrokeColor(black)
+            p.rect(x, y, w, h)
+            font = "Helvetica-Bold" if bold else "Helvetica"
+            p.setFont(font, font_size)
+            if center:
+                text_width = p.stringWidth(str(text), font, font_size)
+                text_x = x + (w - text_width) / 2
+            else:
+                text_x = x + 3
+            text_y = y + h / 2 - font_size / 3
+            p.drawString(text_x, text_y, str(text))
+
+        y = height - 40
+        title_h = 20
+        draw_cell(margin, y, width - 2 * margin, title_h, "ACTA FINAL DE INVENTARIO FÍSICO", 14, True, True)
+        y -= title_h + section_gap
+
+        info_h = 12
+        recuadro_w = (width - 2 * margin - 20) / 2
+        x_izq = margin
+        y_recuadros = y
+
+        draw_cell(x_izq, y_recuadros, recuadro_w - 80, info_h, "PAÍS:", 7, True)
+        draw_cell(x_izq + recuadro_w - 80, y_recuadros, 80, info_h, datos.get('pais') or '', 7, center=True)
+        y_recuadros -= info_h
+        draw_cell(x_izq, y_recuadros, recuadro_w - 80, info_h, "EMPRESA:", 7, True)
+        draw_cell(x_izq + recuadro_w - 80, y_recuadros, 80, info_h, datos.get('empresa') or 'SUPERDEPORTE', 7, center=True)
+        y_recuadros -= info_h
+        draw_cell(x_izq, y_recuadros, recuadro_w - 80, info_h, "CONCEPTO:", 7, True)
+        draw_cell(x_izq + recuadro_w - 80, y_recuadros, 80, info_h, datos.get('concepto') or '', 7, center=True)
+        y_recuadros -= info_h
+        draw_cell(x_izq, y_recuadros, recuadro_w - 80, info_h, "CENTRO:", 7, True)
+        draw_cell(x_izq + recuadro_w - 80, y_recuadros, 80, info_h, datos.get('centro') or '', 7, center=True)
+        y_recuadros -= info_h
+        draw_cell(x_izq, y_recuadros, recuadro_w - 80, info_h, "ALMACÉN:", 7, True)
+        draw_cell(x_izq + recuadro_w - 80, y_recuadros, 80, info_h, datos.get('almacen') or '', 7, center=True)
+        y_recuadros -= info_h
+
+        # Mostrar conteos incluidos
+        conteos_label = datos.get('numeros_conteo') or ''
+        draw_cell(x_izq, y_recuadros, recuadro_w, info_h, f"Conteos: {conteos_label}", 6, center=False)
+        y_recuadros -= info_h
+
+        x_der = margin + recuadro_w + 20
+        y_horarios = y
+
+        if datos['fecha_primer_conteo']:
+            try:
+                fecha_conteo = datos['fecha_primer_conteo'].strftime("%A, %d de %B de %Y")
+            except Exception:
+                fecha_conteo = datetime.now().strftime("%A, %d de %B de %Y")
+        else:
+            fecha_conteo = datetime.now().strftime("%A, %d de %B de %Y")
+
+        draw_cell(x_der, y_horarios, recuadro_w, info_h, fecha_conteo, 7, True, True)
+        y_horarios -= info_h
+
+        hora_inicio = "7:00 AM"
+        if datos['fecha_primer_conteo']:
+            try:
+                hora_inicio = datos['fecha_primer_conteo'].strftime("%I:%M %p")
+            except Exception:
+                pass
+        draw_cell(x_der, y_horarios, recuadro_w - 60, info_h, "Hora de inicio:", 7)
+        draw_cell(x_der + recuadro_w - 60, y_horarios, 60, info_h, hora_inicio, 7, center=True)
+        y_horarios -= info_h
+
+        hora_fin = "9:00 PM"
+        if datos['fecha_segundo_conteo']:
+            try:
+                hora_fin = datos['fecha_segundo_conteo'].strftime("%I:%M %p")
+            except Exception:
+                pass
+        draw_cell(x_der, y_horarios, recuadro_w - 60, info_h, "Hora de finalización:", 7)
+        draw_cell(x_der + recuadro_w - 60, y_horarios, 60, info_h, hora_fin, 7, center=True)
+
+        y = min(y_recuadros, y_horarios) - section_gap - (3 * info_h)
+
+        tabla_w = (width - 2 * margin - 20) / 2
+        x_izq = margin
+        y_tablas = y
+
+        draw_cell(x_izq, y_tablas, tabla_w, info_h, "Personal ejecutando Toma Física", 7, True, True)
+        y_personal = y_tablas - info_h
+        for cargo, cant in [
+            ("Jefe de Tienda", datos['jefe_tienda'] or 0),
+            ("Subjefe de Tienda", datos['subjefe_tienda'] or 0),
+            ("Auxiliar de Ventas", datos['auxiliar_ventas'] or 0),
+            ("Auxiliar de Caja", datos['auxiliar_caja'] or 0),
+            ("Auxiliar de Bodega", datos['auxiliar_bodega'] or 0),
+            ("Auxiliar Operativo", datos['auxiliar_operativo'] or 0),
+        ]:
+            draw_cell(x_izq, y_personal - row_height, tabla_w - 25, row_height, cargo, 6)
+            draw_cell(x_izq + tabla_w - 25, y_personal - row_height, 25, row_height, str(cant), 6, center=True)
+            y_personal -= row_height
+
+        x_der = margin + tabla_w + 20
+        y_admin = y_tablas
+        draw_cell(x_der, y_admin, tabla_w, info_h, "Personal Administrativo presente", 7, True, True)
+        y_admin -= info_h
+        for item, valor in [
+            ("Asistente Operativo Inventarios", datos['asistente_opertaivo_inventario'] or 0),
+            ("Jefe de Inventarios", datos['jefe_inventarios'] or 0),
+            ("Auditor Interno", datos['auditor_interno'] or 0),
+            ("Contado", datos['contado'] or 0),
+            ("Gerente Regional", datos['gerente_regional'] or 0),
+            ("Supervisor Comercial", datos['supervisor_comercial'] or 0),
+        ]:
+            draw_cell(x_der, y_admin - row_height, tabla_w - 25, row_height, item, 6)
+            draw_cell(x_der + tabla_w - 25, y_admin - row_height, 25, row_height, str(valor), 6, center=True)
+            y_admin -= row_height
+
+        y = min(y_personal, y_admin) - section_gap
+        y_min = y - 15
+
+        x_izq = margin
+        y_stock = y_min
+        draw_cell(x_izq, y_stock, tabla_w, info_h, "Stock SAP", 7, True, True)
+        y_stock -= info_h
+        stock_data = []
+        stock_total = datos.get('stock_sap_total', 0)
+        suma_cat = 0
+        for key, label in [('calzado', 'CALZADO'), ('ropa', 'ROPA'), ('accesorio', 'ACCESORIOS'),
+                            ('fundas', 'FUNDAS'), ('otros', 'OTROS')]:
+            raw_val = datos.get(f'stock_sap_valor_{key}')
+            if raw_val in (None, ''):
+                valor = Decimal(0)
+            else:
+                s = str(raw_val).strip().replace(' ', '').replace(',', '')
+                if s.count('.') > 1:
+                    s = s.replace('.', '')
+                try:
+                    valor = Decimal(s)
+                except Exception:
+                    valor = Decimal(0)
+            stock_data.append((label, valor))
+            suma_cat += valor
+        if not stock_total:
+            stock_total = suma_cat
+        stock_data.append(("Total:", Decimal(int(stock_total))))
+        for item, valor in stock_data:
+            is_total = item == "Total:"
+            try:
+                display_val = f"{int(valor):,}" if valor == valor.to_integral_value() else f"{valor:,.2f}"
+            except Exception:
+                display_val = str(valor)
+            draw_cell(x_izq, y_stock - row_height, tabla_w - 60, row_height, item, 6, is_total)
+            draw_cell(x_izq + tabla_w - 60, y_stock - row_height, 60, row_height, display_val, 6, is_total, True)
+            y_stock -= row_height
+
+        x_der = margin + tabla_w + 20
+        y_items = y_min
+        draw_cell(x_der, y_items, tabla_w, info_h, "Items inventariados", 7, True, True)
+        y_items -= info_h
+        for item, valor, _ in [
+            ("Cantidad MARCAS:", datos['cantidad_marcas'] or 0, False),
+            ("Cantidad LÍNEAS:", datos['cantidad_lineas'] or 0, False),
+            ("Cantidad ITEMS:", datos['cantidad_items'] or 0, False),
+            ("Cantidad Items faltantes:", datos['cantidad_items_faltantes'] or 0, False),
+            ("Cantidad Items sobrantes:", datos['cantidad_items_sobrantes'] or 0, False),
+            ("Valor Items faltantes:", f"-${abs(datos['valor_items_faltantes'] or 0):,.2f}", False),
+            ("Valor Items sobrantes:", f"${datos['valor_items_sobrantes'] or 0:,.2f}", False),
+            ("Código de inventario:", datos['codigo_inventario'] or '', False),
+            ("Líneas de diferencias:", datos['lineas_diferencias'] or '', False),
+        ]:
+            lw = tabla_w - 80 if "Código" in item else tabla_w - 60
+            vw = 80 if "Código" in item else 60
+            draw_cell(x_der, y_items - row_height, lw, row_height, item, 6)
+            draw_cell(x_der + lw, y_items - row_height, vw, row_height, str(valor), 6, center=True)
+            y_items -= row_height
+
+        if datos['hora_genero_informe_inven_sap']:
+            try:
+                hora_informe = datos['hora_genero_informe_inven_sap'].strftime("%I:%M %p")
+            except Exception:
+                hora_informe = ""
+        else:
+            hora_informe = ""
+        if hora_informe:
+            draw_cell(x_der, y_items - row_height, tabla_w - 60, row_height, "Hora: generó Informe Invensap", 6)
+            draw_cell(x_der + tabla_w - 60, y_items - row_height, 60, row_height, hora_informe, 6, center=True)
+            y_items -= row_height
+
+        draw_cell(x_der, y_items - row_height, tabla_w - 60, row_height, "Toma Física grupo:", 6)
+        draw_cell(x_der + tabla_w - 60, y_items - row_height, 60, row_height, datos['toma_fisica_grupo'] or '', 6, center=True)
+        y_items -= row_height
+
+        y_min = min(y_stock, y_items) - 15
+        tabla_completa_w = width - 2 * margin
+        anio_ant = timezone.now().year - 1
+        for item, valor in [
+            ("Se confirmó encerado de guías de remisión:", datos['confirmo_encerado_guia_remi'] or 'NO'),
+            ("Fecha de la toma física de inventario anterior:",
+             datos['fecha_toma_fisica_anterior'].strftime("%A, %d de %B de %Y") if datos['fecha_toma_fisica_anterior'] else ''),
+            (f"Cantidad Items toma física parcial último inventario {anio_ant}:", datos['cantidad_item_ultimo_inv'] or ''),
+            (f"Número de tomas Físicas anteriores en el año {anio_ant}:", datos['numero_toma_fisica_anterior'] or 0),
+            ("Cantidad Items toma física ACUMULATIVO ANUAL:", f"{datos['cantidad_item_acumula_anual']}"),
+        ]:
+            draw_cell(margin, y_min - row_height, tabla_completa_w - 100, row_height, item, 6)
+            draw_cell(margin + tabla_completa_w - 100, y_min - row_height, 100, row_height, str(valor), 6, center=True)
+            y_min -= row_height
+
+        y_min -= 25
+        seccion_w = (width - 2 * margin - 20) / 2
+        y_seccion = y_min
+
+        x_caja = margin
+        draw_cell(x_caja, y_seccion, seccion_w, 10, "VALORES DE CAJA", 6, True, True)
+        y_caja = y_seccion - 10
+        for item, valor in [
+            ("Efectivo", f"${datos['valor_efectivo'] or 0:.0f}"),
+            ("Facturas", f"${datos['valor_facturas'] or 0:.0f}"),
+            ("Cheques", f"${datos['valor_cheques'] or 0:.0f}"),
+            ("Fondo de Caja", f"${datos['fondo_caja'] or 0:.0f}"),
+            ("Fondo de Sueltos", f"${datos['fondo_sueltos'] or 0:.0f}"),
+            ("TOTAL", f"${datos['total'] or 0:.0f}"),
+        ]:
+            is_total = item == "TOTAL"
+            draw_cell(x_caja, y_caja - 9, seccion_w - 50, 9, item, 5, is_total)
+            draw_cell(x_caja + seccion_w - 50, y_caja - 9, 50, 9, valor, 5, is_total, True)
+            y_caja -= 9
+
+        y_caja -= 15
+        centro_sap_w = seccion_w // 2
+        draw_cell(x_caja, y_caja, centro_sap_w, 12, "CENTRO SAP", 6, True, True)
+        draw_cell(x_caja + centro_sap_w, y_caja, centro_sap_w, 12, datos['almacen'] or '', 6, True, True)
+
+        x_docs = margin + seccion_w + 20
+        y_docs = y_seccion
+        empresa = datos.get('empresa') or 'SUPERDEPORTE'
+        empresa_label = empresa if empresa.strip().upper().endswith('S.A.') else f"{empresa} S.A."
+        pais_label = datos.get('pais') or ''
+        draw_cell(x_docs, y_docs, seccion_w - 30, 10, f"Sucursal {empresa_label} - {pais_label}", 6, True)
+        sucursal_label = datos.get('sucursal') or ''
+        sap_mcu = datos.get('sap_hcm_mcu')
+        sucursal_line = f"{sucursal_label} / {sap_mcu}" if sap_mcu else sucursal_label
+        draw_cell(x_docs + seccion_w - 30, y_docs, 30, 10, sucursal_line, 6, True, True)
+        y_docs -= 10
+        draw_cell(x_docs, y_docs, seccion_w, 8, "Última factura de venta Número:", 5, True)
+        y_docs -= 8
+        for factura, caja in [
+            (datos['ultima_fact_caja1'] or '', 'caja1'), (datos['ultima_fact_caja2'] or '', 'caja2'),
+            (datos['ultima_fact_caja3'] or '', 'caja3'), (datos['ultima_fact_caja4'] or '', 'caja4'),
+            (datos['ultima_fact_caja5'] or '', 'caja5'),
+        ]:
+            draw_cell(x_docs, y_docs - 7, seccion_w - 30, 7, factura, 4)
+            draw_cell(x_docs + seccion_w - 30, y_docs - 7, 30, 7, caja, 4, center=True)
+            y_docs -= 7
+        y_docs -= 12
+        draw_cell(x_docs, y_docs, seccion_w, 8, "Último número documento:", 5, True)
+        y_docs -= 8
+        for doc, tipo in [
+            (datos['ultimo_doc_guia_remision'] or '', 'Guía Remisión'),
+            (datos['ultimo_doc_nota_credit'] or '', 'Nota Crédito'),
+        ]:
+            draw_cell(x_docs, y_docs - 8, seccion_w - 45, 8, doc, 5)
+            draw_cell(x_docs + seccion_w - 45, y_docs - 8, 45, 8, tipo, 5, center=True)
+            y_docs -= 8
+
+        y_bottom = min(y_caja, y_docs) - 15
+        draw_cell(margin, y_bottom, width - 2 * margin, 12, "FIRMAS DE RESPONSABILIDAD", 7, True, True)
+        y_bottom -= 25
+
+        firmas_validas = []
+        for i in range(1, 9):
+            cargo = (datos.get(f'cargo_{i}') or '').strip()
+            nombre = (datos.get(f'nombre_cargo_{i}') or '').strip()
+            if cargo and nombre:
+                firmas_validas.append({'cargo': cargo, 'nombre': nombre})
+
+        if not firmas_validas:
+            firmas_validas = [
+                {'cargo': 'Gerente Operaciones', 'nombre': ''},
+                {'cargo': 'Jefe Inventarios', 'nombre': ''},
+                {'cargo': 'Supervisor Comercial', 'nombre': ''},
+                {'cargo': 'Auditor Interno', 'nombre': ''},
+            ]
+
+        total_firmas = len(firmas_validas)
+        firmas_por_fila = 4 if total_firmas > 4 else total_firmas
+        firma_w = (width - 2 * margin - 30) / firmas_por_fila
+        for i, fd in enumerate(firmas_validas):
+            fila = i // firmas_por_fila
+            col = i % firmas_por_fila
+            x = margin + col * (firma_w + 10)
+            yf = y_bottom - fila * 60
+            p.line(x, yf - 18, x + firma_w, yf - 18)
+            if fd['nombre']:
+                p.setFont("Helvetica-Bold", 6)
+                tw = p.stringWidth(fd['nombre'], "Helvetica-Bold", 6)
+                p.drawString(x + (firma_w - tw) / 2, yf - 27, fd['nombre'])
+                p.setFont("Helvetica", 5)
+                tw = p.stringWidth(fd['cargo'], "Helvetica", 5)
+                p.drawString(x + (firma_w - tw) / 2, yf - 35, fd['cargo'])
+            else:
+                p.setFont("Helvetica", 5)
+                tw = p.stringWidth(fd['cargo'], "Helvetica", 5)
+                p.drawString(x + (firma_w - tw) / 2, yf - 30, fd['cargo'])
+
+        p.showPage()
+        p.save()
+        return response
+
+    except Exception as e:
+        print(f"❌ Error al generar PDF acta final: {e}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'success': False, 'message': f'Error al generar PDF: {str(e)}'}, status=500)

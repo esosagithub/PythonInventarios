@@ -101,8 +101,51 @@
             </div>
         </div>
 
+        {% if actas_finales %}
+        <div class="card" id="actasGeneradasContainer">
+            <h2>Actas Finales Generadas</h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Conteos Incluidos</th>
+                            <th>Centro</th>
+                            <th>Almacén</th>
+                            <th>Estado</th>
+                            <th>Fecha Creación</th>
+                            <th>Usuario</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for acta in actas_finales %}
+                        <tr>
+                            <td style="max-width:220px; word-break:break-all;">{{ acta.numeros_conteo }}</td>
+                            <td>{{ acta.centro }}</td>
+                            <td>{{ acta.almacen }}</td>
+                            <td><span class="status-badge">{{ acta.estado }}</span></td>
+                            <td>{{ acta.fecha_creacion }}</td>
+                            <td>{{ acta.usuario_creacion }}</td>
+                            <td>
+                                <button class="btn btn-primary btn-icon" title="Imprimir"
+                                    onclick="imprimirActaFinal({{ acta.acta_final_id }})">
+                                    <i class="fas fa-print"></i>
+                                </button>
+                                <button class="btn btn-secondary btn-icon" title="Eliminar"
+                                    onclick="eliminarActaFinal({{ acta.acta_final_id }}, '{{ acta.numeros_conteo }}')">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
         <div id="conteosContainer" class="card">
-            <h2>Conteo</h2>
+            <h2>Conteos Pendientes (Tercer Conteo)</h2>
             <div class="table-responsive">
                 <table class="data-table">
                     <thead>
@@ -122,7 +165,9 @@
                         {% for conteo in conteos %}
                         <tr>
                             <td>
-                                <input type="checkbox" class="conteo-checkbox" value="{{ conteo.numero_conteo }}">
+                                <input type="checkbox" class="conteo-checkbox" value="{{ conteo.numero_conteo }}"
+                                    data-centro="{{ conteo.centro|default_if_none:'' }}"
+                                    data-almacen="{{ conteo.almacen|default_if_none:'' }}">
                             </td>
                             <td>{{ conteo.numero_conteo }}</td>
                             <td>
@@ -225,7 +270,9 @@
         tbody.innerHTML = conteos.map(c => `
             <tr>
                 <td>
-                    <input type="checkbox" class="conteo-checkbox" value="${escapeHtml(c.numero_conteo)}">
+                    <input type="checkbox" class="conteo-checkbox" value="${escapeHtml(c.numero_conteo)}"
+                        data-centro="${escapeHtml(c.centro || '')}"
+                        data-almacen="${escapeHtml(c.almacen || '')}">
                 </td>
                 <td>${escapeHtml(c.numero_conteo)}</td>
                 <td><span class="status-badge status-${escapeHtml((c.estado || '').toLowerCase())}">${escapeHtml(c.estado)}</span></td>
@@ -240,10 +287,88 @@
     }
 
     function generarActa() {
-        const seleccionados = Array.from(document.querySelectorAll('.conteo-checkbox:checked'))
-            .map(checkbox => checkbox.value);
+        const seleccionados = Array.from(document.querySelectorAll('.conteo-checkbox:checked'));
+        const numerosConteo = seleccionados.map(checkbox => checkbox.value);
 
-        console.log('Conteos seleccionados para generar acta:', seleccionados);
+        if (seleccionados.length === 0) {
+            alert('Seleccione al menos un conteo para generar el acta final.');
+            return;
+        }
+
+        const centros = new Set(seleccionados.map(checkbox => (checkbox.dataset.centro || '').trim().toUpperCase()));
+        const almacenes = new Set(seleccionados.map(checkbox => (checkbox.dataset.almacen || '').trim().toUpperCase()));
+
+        if (centros.size > 1 || almacenes.size > 1) {
+            alert('No se puede generar el acta final.\n\nTodos los conteos seleccionados deben corresponder al mismo centro y al mismo almacén.');
+            return;
+        }
+
+        showLoading('Validando conteos seleccionados...');
+
+        fetch('{% url "acta_final" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+                action: 'generar_acta_final',
+                numeros_conteo: numerosConteo
+            })
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, data })))
+        .then(({ ok, data }) => {
+            hideLoading();
+            if (!ok || !data.success) {
+                alert(data.message || 'No se pudo generar el acta final.');
+                return;
+            }
+            // Redirigir al formulario con los conteos seleccionados
+            const params = new URLSearchParams({ numeros_conteo: numerosConteo.join(',') });
+            window.location.href = '{% url "formulario_acta_final" %}?' + params.toString();
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error al generar acta final:', error);
+            alert('Error al validar los conteos seleccionados.');
+        });
+    }
+
+    function imprimirActaFinal(actaFinalId) {
+        showLoading('Generando PDF...');
+        window.open('/imprimir-acta-final/' + actaFinalId + '/', '_blank');
+        setTimeout(hideLoading, 1500);
+    }
+
+    function eliminarActaFinal(actaFinalId, numerosConteo) {
+        if (!confirm('¿Está seguro de eliminar el Acta Final?\n\nConteos: ' + numerosConteo + '\n\nLos conteos volverán al estado TERCER_CONTEO.')) {
+            return;
+        }
+        showLoading('Eliminando acta final...');
+        fetch('/eliminar-acta-final/' + actaFinalId + '/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                alert(data.message);
+                window.location.reload();
+            } else {
+                alert('Error: ' + (data.message || 'No se pudo eliminar el acta final.'));
+            }
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error:', error);
+            alert('Error al eliminar el acta final.');
+        });
     }
 </script>
 
@@ -346,6 +471,26 @@
         width: 16px;
         height: 16px;
         cursor: pointer;
+    }
+
+    .btn-icon {
+        width: 27px;
+        height: 27px;
+        padding: 0;
+        border: none;
+        cursor: pointer;
+        border-radius: 6px;
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.9em;
+        transition: all 0.2s ease;
+        margin-right: 2px;
+    }
+
+    .btn-icon:hover {
+        transform: translateY(-1px);
     }
 
     .status-badge {

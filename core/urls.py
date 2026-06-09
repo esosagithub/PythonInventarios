@@ -68,6 +68,10 @@ urlpatterns = [
     path('guardar-detalle-tercer-conteo/', views.guardar_detalle_tercer_conteo, name='guardar_detalle_tercer_conteo'),
     path('actualizar-estado-tercer-conteo/', views.actualizar_estado_tercer_conteo, name='actualizar_estado_tercer_conteo'),
     path('acta-final/', views.acta_final, name='acta_final'),
+    path('formulario-acta-final/', views.formulario_acta_final, name='formulario_acta_final'),
+    path('guardar-acta-final/', views.guardar_acta_final, name='guardar_acta_final'),
+    path('eliminar-acta-final/<int:acta_final_id>/', views.eliminar_acta_final, name='eliminar_acta_final'),
+    path('imprimir-acta-final/<int:acta_final_id>/', views.imprimir_acta_final_pdf, name='imprimir_acta_final_pdf'),
 
     # Acta Preliminar
     path('acta-preliminar/', views.acta_preliminar, name='acta_preliminar'),
