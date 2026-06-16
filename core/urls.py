@@ -55,6 +55,8 @@ urlpatterns = [
     path('finalizar-conteo/<int:piqueo_id>/', views.finalizar_conteo, name='finalizar_conteo'),
     path('diferencias-segundo-conteo/<int:piqueo_id>/', views.diferencias_segundo_conteo, name='diferencias_segundo_conteo'),
     path('asignar-colaborador-diferencia/', views.asignar_colaborador_diferencia, name='asignar_colaborador_diferencia'),
+    path('modificar-diferencia-segundo-conteo/', views.modificar_diferencia_segundo_conteo, name='modificar_diferencia_segundo_conteo'),
+    path('auditoria-diferencias-segundo-conteo/<str:numero_conteo>/', views.auditoria_diferencias_segundo_conteo, name='auditoria_diferencias_segundo_conteo'),
     path('obtener-colaboradores-conteo-redistribucion/', views.obtener_colaboradores_conteo_redistribucion, name='obtener_colaboradores_conteo_redistribucion'),
     path('redistribuir-diferencias-segundo-conteo/', views.redistribuir_diferencias_segundo_conteo, name='redistribuir_diferencias_segundo_conteo'),
     
@@ -62,6 +64,11 @@ urlpatterns = [
     path('imprimir-zona-secuencia/<int:secuencial_deta_id>/', views.imprimir_zona_secuencia_print, name='imprimir_zona_secuencia'),
     path('imprimir-zonas-cola/', views.imprimir_zonas_cola, name='imprimir_zonas_cola'),
     
+    # Verifica Segundo Conteo (Jefe de Tienda)
+    path('verifica-segundo-conteo/', views.verifica_segundo_conteo, name='verifica_segundo_conteo'),
+    path('detalle-verifica-segundo-conteo/<str:numero_conteo>/', views.detalle_verifica_segundo_conteo, name='detalle_verifica_segundo_conteo'),
+    path('guardar-detalle-verifica-segundo-conteo/', views.guardar_detalle_verifica_segundo_conteo, name='guardar_detalle_verifica_segundo_conteo'),
+    path('auditoria-verifica-segundo-conteo/<str:numero_conteo>/', views.auditoria_verifica_segundo_conteo, name='auditoria_verifica_segundo_conteo'),
     # Tercer Conteo
     path('tercer-conteo/', views.tercer_conteo, name='tercer_conteo'),
     path('detalle-tercer-conteo/<str:numero_conteo>/', views.detalle_tercer_conteo, name='detalle_tercer_conteo'),

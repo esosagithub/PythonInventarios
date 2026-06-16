@@ -88,6 +88,12 @@
                             <option value="">-- Todos --</option>
                         </select>
                     </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <label for="filtroEan" style="margin:0; font-size:12px; color:#333;">EAN:</label>
+                        <input id="filtroEan" class="form-control" type="search"
+                            inputmode="numeric" placeholder="Buscar EAN"
+                            style="min-width:180px;">
+                    </div>
                     <button class="btn btn-redistribuir" type="button" onclick="abrirModalRedistribuir()">
                         <i class="fas fa-random"></i>
                         Redistribuir
@@ -129,8 +135,9 @@
                             <td>{{ diferencia.ubicacion_fisica }}</td>
                             <td class="numero-cell">{{ diferencia.conteo_fisico }}</td>
                             <td class="numero-cell">{{ diferencia.stock_sistema }}</td>
-                            <td class="diferencia-cell {% if diferencia.diferencia > 0 %}positiva{% elif diferencia.diferencia < 0 %}negativa{% endif %}">
-                                {{ diferencia.diferencia }}
+                            <td class="diferencia-cell {% if diferencia.diferencia > 0 %}positiva{% elif diferencia.diferencia < 0 %}negativa{% endif %}"
+                                data-diferencia-original="{{ diferencia.diferencia }}">
+                                <span class="diferencia-valor">{{ diferencia.diferencia }}</span>
                             </td>
                             <td class="colaborador-cell">
                                 <span id="colaborador-{{ diferencia.codigo_barras }}">{{ diferencia.nombre_colaborador }}</span>
@@ -173,6 +180,47 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de auditoría de diferencias -->
+<div id="modalAuditoria" class="modal" style="display:none;">
+    <div class="modal-content modal-auditoria">
+        <div class="modal-header">
+            <h3>Auditoría del Conteo {{ conteo.numero_conteo }}</h3>
+            <span class="close" onclick="cerrarAuditoria()">&times;</span>
+        </div>
+
+        <div class="modal-body">
+            <div id="auditoriaLoading" class="redistribuir-loading" style="display:none;">
+                Cargando auditoría...
+            </div>
+            <div id="auditoriaEmpty" class="redistribuir-empty" style="display:none;">
+                No existen modificaciones registradas para este conteo.
+            </div>
+            <div id="auditoriaTablaContainer" class="table-responsive" style="display:none;">
+                <table class="data-table auditoria-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Nombre</th>
+                            <th>Cédula</th>
+                            <th>Proceso</th>
+                            <th>Código SAP</th>
+                            <th>EAN</th>
+                            <th>Anterior</th>
+                            <th>Nueva</th>
+                            <th>Almacén</th>
+                        </tr>
+                    </thead>
+                    <tbody id="auditoriaTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn btn-secondary" type="button" onclick="cerrarAuditoria()">Cerrar</button>
         </div>
     </div>
 </div>
@@ -274,6 +322,12 @@ function hideLoading() {
 }
 
 // ========== FUNCIONES AUXILIARES ==========
+function escapeHtml(value) {
+    const element = document.createElement('div');
+    element.textContent = String(value ?? '');
+    return element.innerHTML;
+}
+
 function getCookie(name) {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -508,11 +562,15 @@ function guardarAsignacionColaborador() {
 window.onclick = function(event) {
     const modal = document.getElementById('modalAsignarColaborador');
     const modalRedistribuir = document.getElementById('modalRedistribuir');
+    const modalAuditoria = document.getElementById('modalAuditoria');
     if (event.target === modal) {
         cerrarModalAsignar();
     }
     if (event.target === modalRedistribuir) {
         cerrarModalRedistribuir();
+    }
+    if (event.target === modalAuditoria) {
+        cerrarAuditoria();
     }
 }
 
@@ -520,9 +578,68 @@ window.onclick = function(event) {
 document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape') {
         cerrarModalAsignar();
+        cerrarModalRedistribuir();
+        cerrarAuditoria();
         hideLoading();
     }
 });
+
+function abrirAuditoria() {
+    const modal = document.getElementById('modalAuditoria');
+    const loading = document.getElementById('auditoriaLoading');
+    const empty = document.getElementById('auditoriaEmpty');
+    const table = document.getElementById('auditoriaTablaContainer');
+    const tbody = document.getElementById('auditoriaTableBody');
+    const numeroConteo = '{{ conteo.numero_conteo|escapejs }}';
+
+    modal.style.display = 'block';
+    loading.style.display = 'block';
+    empty.style.display = 'none';
+    table.style.display = 'none';
+    tbody.innerHTML = '';
+
+    fetch(`/auditoria-diferencias-segundo-conteo/${encodeURIComponent(numeroConteo)}/`)
+        .then(response => response.json())
+        .then(data => {
+            loading.style.display = 'none';
+
+            if (!data.success) {
+                alert(data.message || 'No se pudo consultar la auditoría.');
+                return;
+            }
+
+            const registros = Array.isArray(data.auditoria) ? data.auditoria : [];
+            if (!registros.length) {
+                empty.style.display = 'block';
+                return;
+            }
+
+            tbody.innerHTML = registros.map(item => `
+                <tr>
+                    <td>${escapeHtml(item.fecha_modificacion || '')}</td>
+                    <td>${escapeHtml(item.nombre_usuario || '')}</td>
+                    <td>${escapeHtml(item.cedula_usuario || '')}</td>
+                    <td>${escapeHtml(item.proceso || '')}</td>
+                    <td>${escapeHtml(item.codigo_sap || '')}</td>
+                    <td>${escapeHtml(item.ean || '')}</td>
+                    <td class="numero-cell">${escapeHtml(item.diferencia_anterior ?? '')}</td>
+                    <td class="numero-cell">${escapeHtml(item.diferencia_nueva ?? '')}</td>
+                    <td>${escapeHtml(item.almacen || '')}</td>
+                </tr>
+            `).join('');
+            table.style.display = 'block';
+        })
+        .catch(error => {
+            loading.style.display = 'none';
+            console.error('Error consultando auditoría:', error);
+            alert(`Error al consultar la auditoría: ${error.message}`);
+        });
+}
+
+function cerrarAuditoria() {
+    const modal = document.getElementById('modalAuditoria');
+    if (modal) modal.style.display = 'none';
+}
 
 // ========== PAGINACIÓN Y FILTRO POR COLABORADOR ==========
 document.addEventListener('DOMContentLoaded', function() {
@@ -547,7 +664,13 @@ function inicializarPaginacion() {
     // Eventos paginación y filtro
     document.getElementById('prev20').addEventListener('click', () => changePage(-PAGE_SIZE));
     document.getElementById('next20').addEventListener('click', () => changePage(PAGE_SIZE));
+    const filtro = document.getElementById('filtroColaborador');
+    const filtroEan = document.getElementById('filtroEan');
     filtro.addEventListener('change', () => {
+        currentStart = 0;
+        renderPage(currentStart);
+    });
+    filtroEan.addEventListener('input', () => {
         currentStart = 0;
         renderPage(currentStart);
     });
@@ -581,13 +704,23 @@ function reconstruirOpcionesFiltroColaborador() {
 }
 
 function getFilteredRows() {
-    const filtro = document.getElementById('filtroColaborador');
-    const val = filtro ? filtro.value : '';
-    if (!val) return diferenciasRows;
+    const filtroColaborador = document.getElementById('filtroColaborador');
+    const filtroEan = document.getElementById('filtroEan');
+    const colaborador = filtroColaborador ? filtroColaborador.value : '';
+    const eanBuscado = filtroEan ? filtroEan.value.trim().toLowerCase() : '';
+
     return diferenciasRows.filter(r => {
         const col = (r.getAttribute('data-colaborador') || '').trim();
-        if (val === '__SIN_ASIGNAR__') return !col;
-        return col === val;
+        const celdas = r.querySelectorAll('td');
+        const ean = celdas.length > 4
+            ? (celdas[4].textContent || '').trim().toLowerCase()
+            : '';
+
+        const coincideColaborador = !colaborador
+            || (colaborador === '__SIN_ASIGNAR__' ? !col : col === colaborador);
+        const coincideEan = !eanBuscado || ean.includes(eanBuscado);
+
+        return coincideColaborador && coincideEan;
     });
 }
 
@@ -906,6 +1039,97 @@ function esFilaPendienteSegundoConteo(row) {
     if (!estado) return true;
     if (estado.includes('ACEPT') || estado.includes('COMPLET')) return false;
     return true;
+}
+
+function editarDiferencia(button) {
+    const row = button.closest('tr');
+    const cell = row.querySelector('.diferencia-cell');
+    const actions = row.querySelector('.diferencia-acciones-cell');
+    cell.querySelector('.diferencia-valor').style.display = 'none';
+    cell.querySelector('.diferencia-input').style.display = 'inline-block';
+    actions.querySelector('.diferencia-btn-editar').style.display = 'none';
+    actions.querySelector('.diferencia-btn-guardar').style.display = 'inline-flex';
+    actions.querySelector('.diferencia-btn-cancelar').style.display = 'inline-flex';
+    cell.querySelector('.diferencia-input').focus();
+}
+
+function cancelarEdicionDiferencia(button) {
+    const row = button.closest('tr');
+    const cell = row.querySelector('.diferencia-cell');
+    const original = cell.getAttribute('data-diferencia-original');
+    cell.querySelector('.diferencia-input').value = original;
+    cerrarEdicionDiferencia(row);
+}
+
+function cerrarEdicionDiferencia(row) {
+    const cell = row.querySelector('.diferencia-cell');
+    const actions = row.querySelector('.diferencia-acciones-cell');
+    cell.querySelector('.diferencia-valor').style.display = '';
+    cell.querySelector('.diferencia-input').style.display = 'none';
+    actions.querySelector('.diferencia-btn-editar').style.display = 'inline-flex';
+    actions.querySelector('.diferencia-btn-guardar').style.display = 'none';
+    actions.querySelector('.diferencia-btn-cancelar').style.display = 'none';
+}
+
+function actualizarColorDiferencia(cell, valor) {
+    cell.classList.remove('positiva', 'negativa');
+    if (valor > 0) {
+        cell.classList.add('positiva');
+    } else if (valor < 0) {
+        cell.classList.add('negativa');
+    }
+}
+
+function guardarDiferencia(button) {
+    const row = button.closest('tr');
+    const cell = row.querySelector('.diferencia-cell');
+    const input = cell.querySelector('.diferencia-input');
+    const nuevaDiferencia = input.value;
+    const diferenciaId = row.getAttribute('data-diferencia-id');
+
+    if (nuevaDiferencia === '' || Number.isNaN(Number(nuevaDiferencia))) {
+        alert('Ingrese una diferencia numerica valida.');
+        input.focus();
+        return;
+    }
+
+    button.disabled = true;
+    showLoading('Guardando diferencia...');
+
+    fetch('/modificar-diferencia-segundo-conteo/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+            diferencia_id: diferenciaId,
+            nueva_diferencia: nuevaDiferencia
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            alert(data.message || 'No se pudo modificar la diferencia.');
+            return;
+        }
+
+        const valorNuevo = Number(data.diferencia_nueva);
+        cell.setAttribute('data-diferencia-original', String(valorNuevo));
+        cell.querySelector('.diferencia-valor').textContent = valorNuevo;
+        input.value = valorNuevo;
+        actualizarColorDiferencia(cell, valorNuevo);
+        cerrarEdicionDiferencia(row);
+        alert(data.message);
+    })
+    .catch(error => {
+        console.error('Error modificando diferencia:', error);
+        alert('Error al modificar la diferencia.');
+    })
+    .finally(() => {
+        button.disabled = false;
+        hideLoading();
+    });
 }
 </script>
 
@@ -1542,6 +1766,46 @@ function esFilaPendienteSegundoConteo(row) {
 
 .btn-redistribuir:hover {
     background: #073a7b;
+}
+
+.btn-auditoria {
+    background: #475569;
+    color: #fff;
+}
+
+.btn-auditoria:hover {
+    background: #334155;
+}
+
+.modal-auditoria {
+    width: min(1200px, 95vw);
+    max-width: 1200px;
+}
+
+.auditoria-table {
+    min-width: 1050px;
+}
+
+.diferencia-cell {
+    min-width: 145px;
+}
+
+.diferencia-input {
+    width: 75px;
+    padding: 4px 6px;
+    border: 1px solid #64748b;
+    border-radius: 4px;
+}
+
+.diferencia-edit-actions {
+    display: flex;
+    gap: 3px;
+    justify-content: center;
+}
+
+.diferencia-acciones-cell {
+    min-width: 105px;
+    text-align: center;
 }
 
 #prev20,

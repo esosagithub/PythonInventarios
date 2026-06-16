@@ -1,0 +1,1103 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Menú Hamburguesa -->
+    <div class="menu-toggle" id="menuToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+
+    <!-- Overlay para menú móvil -->
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Indicador de Carga Global -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Cargando...</p>
+        </div>
+    </div>
+
+    <!-- Menú Lateral -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+
+        <nav class="sidebar-menu">
+            <ul>
+                <li class="menu-item">
+                    <a href="{% url 'dashboard' %}">
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'administracion_conteo_jefe' %}">
+                        <span>Administración de Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'gestion_conteos' %}">
+                        <span>Gestión de Conteos</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'primer_conteo' %}">
+                        <span>Primer Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'reporte_primer_conteo' %}">
+                        <span>Reporte Primer Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'segundo_conteo' %}">
+                        <span>Segundo Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item active">
+                    <a href="{% url 'verifica_segundo_conteo' %}">
+                        <span>Verifica Segundo Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'acta_preliminar' %}">
+                        <span>Acta Preliminar</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="{% url 'login' %}" class="logout-btn">
+                <span>Cerrar Sesión</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Contenido Principal -->
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Verifica Segundo Conteo</h1>
+            <p>Revisión y edición de conteos en estado Segundo Conteo</p>
+        </div>
+
+        <!-- Estadísticas -->
+        <div class="stats-grid" style="margin-bottom: 15px;">
+            <div class="stat-card">
+                <h3 id="statTotal">{{ estadisticas.total }}</h3>
+                <small>Total en Segundo Conteo</small>
+            </div>
+        </div>
+
+        <!-- Tabla de Conteos -->
+        <div id="conteosContainer" class="card">
+            <h2>Conteos</h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Número del Conteo</th>
+                            <th>Estado</th>
+                            <th>Fecha Inicio</th>
+                            <th>Fecha Fin</th>
+                            <th>Responsable</th>
+                            <th>Planifica</th>
+                            <th>Centro</th>
+                            <th>Almacén</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="conteoTableBody">
+                        {% for conteo in conteos %}
+                        <tr data-numero-conteo="{{ conteo.numero_conteo }}">
+                            <td>{{ conteo.numero_conteo }}</td>
+                            <td>
+                                <span class="status-badge status-{{ conteo.estado|lower }}">
+                                    {{ conteo.estado }}
+                                </span>
+                            </td>
+                            <td>{{ conteo.fecha_inicio }}</td>
+                            <td>{{ conteo.fecha_fin }}</td>
+                            <td>{{ conteo.nm_responsable }}</td>
+                            <td>{{ conteo.usuario_creacion }}</td>
+                            <td>{{ conteo.centro }}</td>
+                            <td>{{ conteo.almacen }}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn-icon" title="Ver detalle" onclick="verDetalle('{{ conteo.numero_conteo|escapejs }}')">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="9" style="text-align: center; padding: 20px;">
+                                No hay conteos en estado Segundo Conteo para su almacén.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Detalle -->
+        <div id="detalleCard" class="card detail-card" style="display: none;">
+            <div class="detail-header">
+                <h2 id="detalleTitulo">Detalle del Conteo</h2>
+                <span id="detalleTotal" class="detail-count">0 registros</span>
+            </div>
+            <div class="detail-filters">
+                <div class="detail-filter-group">
+                    <label for="detalleFiltroEan">Filtrar por EAN</label>
+                    <input type="text" id="detalleFiltroEan" class="form-control" placeholder="Buscar EAN" oninput="filtrarDetallePorEan()">
+                </div>
+                <div style="align-self:flex-end;">
+                    <button class="btn btn-auditoria" type="button" onclick="abrirAuditoria()">
+                        <i class="fas fa-history"></i> Auditoría
+                    </button>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table detail-table">
+                    <thead>
+                        <tr>
+                            <th>Acciones</th>
+                            <th>Conteo</th>
+                            <th>SAP</th>
+                            <th>Diferencia</th>
+                            <th>Proceso Segundo Conteo</th>
+                            <th>Observaciones</th>
+                            <th>Nombre Colaborador</th>
+                            <th>Ubicación</th>
+                            <th>Código SAP</th>
+                            <th>EAN</th>
+                            <th>Descripción</th>
+                            <th>Marca</th>
+                            <th>Talla</th>
+                            <th>Grupo Artículos</th>
+                            <th>Groes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detalleBody"></tbody>
+                </table>
+            </div>
+            <div id="detallePagination" class="pagination-footer" style="display: none;">
+                <span id="detallePaginationSummary" class="pagination-summary">0-0 of 0 records</span>
+                <div class="pagination-controls">
+                    <button class="pagination-btn" type="button" title="Primera página" onclick="irPaginaDetalle(1)">
+                        <i class="fas fa-angles-left"></i>
+                    </button>
+                    <button class="pagination-btn" type="button" title="Página anterior" onclick="irPaginaDetalle(detalleCurrentPage - 1)">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <div id="detallePaginationPages" class="pagination-pages"></div>
+                    <button class="pagination-btn" type="button" title="Página siguiente" onclick="irPaginaDetalle(detalleCurrentPage + 1)">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                    <button class="pagination-btn" type="button" title="Última página" onclick="irPaginaDetalle(detalleTotalPages)">
+                        <i class="fas fa-angles-right"></i>
+                    </button>
+                </div>
+                <select id="detallePageSize" class="pagination-size" onchange="cambiarTamanoPaginaDetalle()">
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Auditoría -->
+    <div id="modalAuditoria" class="modal" style="display:none;">
+        <div class="modal-content modal-auditoria">
+            <div class="modal-header">
+                <h3 id="auditoriaModalTitulo">Auditoría del Conteo</h3>
+                <span class="close" onclick="cerrarAuditoria()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="auditoria-filter-row">
+                    <div class="detail-filter-group" style="width:220px;">
+                        <label style="font-size:12px; font-weight:600; color:#333;">Filtrar por EAN</label>
+                        <input type="text" id="auditoriaFiltroEan" class="form-control" placeholder="Buscar EAN..." oninput="filtrarAuditoriaPorEan()">
+                    </div>
+                </div>
+                <div id="auditoriaLoading" style="display:none; padding:20px; text-align:center;">Cargando auditoría...</div>
+                <div id="auditoriaEmpty" style="display:none; padding:20px; text-align:center;">No existen modificaciones registradas para este conteo.</div>
+                <div id="auditoriaTablaContainer" class="table-responsive" style="display:none;">
+                    <table class="data-table auditoria-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Nombre</th>
+                                <th>Cédula</th>
+                                <th>Proceso</th>
+                                <th>Código SAP</th>
+                                <th>EAN</th>
+                                <th>Conteo Anterior</th>
+                                <th>Conteo Nuevo</th>
+                                <th>Almacén</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditoriaTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-modal-cerrar" type="button" onclick="cerrarAuditoria()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{% static 'js/dashboard.js' %}"></script>
+{% csrf_token %}
+<script>
+    let detalleData = [];
+    let detalleFilteredData = [];
+    let detalleCurrentPage = 1;
+    let detallePageSize = 10;
+    let detalleTotalPages = 1;
+    let detalleEditingIndex = null;
+    let currentNumeroConteo = null;
+    let auditoriaData = [];
+
+    function showLoading(message = 'Cargando...') {
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.querySelector('p').textContent = message;
+        overlay.style.display = 'flex';
+    }
+
+    function hideLoading() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    }
+
+    function getCsrfToken() {
+        return document.querySelector('[name=csrfmiddlewaretoken]').value;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function verDetalle(numeroConteo) {
+        currentNumeroConteo = numeroConteo;
+        mostrarSoloConteoSeleccionado(numeroConteo);
+        showLoading('Cargando detalle...');
+
+        fetch(`/detalle-verifica-segundo-conteo/${encodeURIComponent(numeroConteo)}/`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (!data.success) {
+                alert(`Error: ${data.message || 'No se pudo cargar el detalle'}`);
+                return;
+            }
+            actualizarDetalle(data.numero_conteo, data.detalle, data.total);
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error al cargar detalle:', error);
+            alert('Error al cargar el detalle.');
+        });
+    }
+
+    function mostrarSoloConteoSeleccionado(numeroConteo) {
+        document.querySelectorAll('#conteoTableBody tr[data-numero-conteo]').forEach(row => {
+            row.style.display = row.dataset.numeroConteo === numeroConteo ? '' : 'none';
+        });
+    }
+
+    function actualizarDetalle(numeroConteo, detalle, total) {
+        const card = document.getElementById('detalleCard');
+        document.getElementById('detalleTitulo').textContent = `Detalle del Conteo ${numeroConteo}`;
+        document.getElementById('detalleTotal').textContent = `${total} registro${total === 1 ? '' : 's'}`;
+        detalleData = detalle;
+        detalleFilteredData = detalle;
+        detalleCurrentPage = 1;
+        detalleEditingIndex = null;
+        detallePageSize = Number(document.getElementById('detallePageSize').value) || 10;
+        document.getElementById('detalleFiltroEan').value = '';
+        renderizarDetallePagina();
+        card.style.display = 'block';
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function renderizarDetallePagina() {
+        const tbody = document.getElementById('detalleBody');
+        const pagination = document.getElementById('detallePagination');
+        const total = detalleFilteredData.length;
+
+        if (!total) {
+            tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;padding:20px;">No hay diferencias para este conteo.</td></tr>';
+            pagination.style.display = 'none';
+            document.getElementById('detallePaginationSummary').textContent = '0-0 of 0 records';
+            return;
+        }
+
+        detalleTotalPages = Math.max(1, Math.ceil(total / detallePageSize));
+        detalleCurrentPage = Math.min(Math.max(detalleCurrentPage, 1), detalleTotalPages);
+
+        const startIndex = (detalleCurrentPage - 1) * detallePageSize;
+        const endIndex = Math.min(startIndex + detallePageSize, total);
+        const pagina = detalleFilteredData.slice(startIndex, endIndex);
+
+        tbody.innerHTML = pagina.map(item => `<tr>${renderizarFilaDetalle(item)}</tr>`).join('');
+
+        document.getElementById('detallePaginationSummary').textContent = `${startIndex + 1}-${endIndex} of ${total} records`;
+        renderizarBotonesPaginacionDetalle();
+        pagination.style.display = 'flex';
+    }
+
+    function renderizarFilaDetalle(item) {
+        const detalleIndex = detalleData.indexOf(item);
+        const estaEditando = detalleIndex === detalleEditingIndex;
+
+        if (estaEditando) {
+            return `
+                <td>
+                    <div class="action-buttons">
+                        <button class="btn-icon btn-success" title="Guardar" onclick="guardarEdicionDetalle(${detalleIndex})">
+                            <i class="fas fa-save"></i>
+                        </button>
+                        <button class="btn-icon btn-danger" title="Cancelar" onclick="cancelarEdicionDetalle()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </td>
+                <td><input type="number" id="editConteo4" class="inline-edit-input" value="${escapeHtml(item.conteo_4)}"></td>
+                <td>${escapeHtml(item.sap_4)}</td>
+                <td>${escapeHtml(item.diferencia_4)}</td>
+                <td>${escapeHtml(item.proceso_segundo_conteo)}</td>
+                <td>${escapeHtml(item.observaciones)}</td>
+                <td>${escapeHtml(item.nombre_colaborador)}</td>
+                <td>${escapeHtml(item.ubicacion_4)}</td>
+                <td>${escapeHtml(item.codigo_sap)}</td>
+                <td>${escapeHtml(item.ean)}</td>
+                <td>${escapeHtml(item.descripcion)}</td>
+                <td>${escapeHtml(item.marca)}</td>
+                <td>${escapeHtml(item.talla)}</td>
+                <td>${escapeHtml(item.grupo_articulos)}</td>
+                <td>${escapeHtml(item.groes)}</td>
+            `;
+        }
+
+        return `
+            <td>
+                <div class="action-buttons">
+                    <button class="btn-icon" title="Editar" onclick="editarDetalle(${detalleIndex})">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                </div>
+            </td>
+            <td>${escapeHtml(item.conteo_4)}</td>
+            <td>${escapeHtml(item.sap_4)}</td>
+            <td>${escapeHtml(item.diferencia_4)}</td>
+            <td>${escapeHtml(item.proceso_segundo_conteo)}</td>
+            <td>${escapeHtml(item.observaciones)}</td>
+            <td>${escapeHtml(item.nombre_colaborador)}</td>
+            <td>${escapeHtml(item.ubicacion_4)}</td>
+            <td>${escapeHtml(item.codigo_sap)}</td>
+            <td>${escapeHtml(item.ean)}</td>
+            <td>${escapeHtml(item.descripcion)}</td>
+            <td>${escapeHtml(item.marca)}</td>
+            <td>${escapeHtml(item.talla)}</td>
+            <td>${escapeHtml(item.grupo_articulos)}</td>
+            <td>${escapeHtml(item.groes)}</td>
+        `;
+    }
+
+    function renderizarBotonesPaginacionDetalle() {
+        const pagesContainer = document.getElementById('detallePaginationPages');
+        const maxVisiblePages = 5;
+        let startPage = Math.max(1, detalleCurrentPage - Math.floor(maxVisiblePages / 2));
+        let endPage = Math.min(detalleTotalPages, startPage + maxVisiblePages - 1);
+        if (endPage - startPage + 1 < maxVisiblePages) {
+            startPage = Math.max(1, endPage - maxVisiblePages + 1);
+        }
+
+        const pages = [];
+        for (let page = startPage; page <= endPage; page++) {
+            pages.push(`
+                <button class="pagination-page ${page === detalleCurrentPage ? 'active' : ''}" type="button" onclick="irPaginaDetalle(${page})">
+                    ${page}
+                </button>
+            `);
+        }
+        pagesContainer.innerHTML = pages.join('');
+
+        document.querySelectorAll('.pagination-btn').forEach((button, index) => {
+            const isFirstOrPrev = index < 2;
+            const isNextOrLast = index > 1;
+            button.disabled = (isFirstOrPrev && detalleCurrentPage === 1) || (isNextOrLast && detalleCurrentPage === detalleTotalPages);
+        });
+    }
+
+    function irPaginaDetalle(page) {
+        detalleCurrentPage = page;
+        renderizarDetallePagina();
+    }
+
+    function cambiarTamanoPaginaDetalle() {
+        detallePageSize = Number(document.getElementById('detallePageSize').value) || 10;
+        detalleCurrentPage = 1;
+        detalleEditingIndex = null;
+        renderizarDetallePagina();
+    }
+
+    function filtrarDetallePorEan() {
+        const filtroEan = document.getElementById('detalleFiltroEan').value.trim().toLowerCase();
+        detalleFilteredData = detalleData.filter(item => String(item.ean ?? '').toLowerCase().includes(filtroEan));
+        detalleCurrentPage = 1;
+        detalleEditingIndex = null;
+        renderizarDetallePagina();
+    }
+
+    function editarDetalle(detalleIndex) {
+        detalleEditingIndex = detalleIndex;
+        renderizarDetallePagina();
+    }
+
+    function cancelarEdicionDetalle() {
+        detalleEditingIndex = null;
+        renderizarDetallePagina();
+    }
+
+    function guardarEdicionDetalle(detalleIndex) {
+        const item = detalleData[detalleIndex];
+        const conteo4 = document.getElementById('editConteo4').value;
+
+        showLoading('Guardando detalle...');
+
+        fetch('{% url "guardar_detalle_verifica_segundo_conteo" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+                numero_conteo: item.numero_conteo,
+                codigo: item.codigo,
+                codigo_sap: item.codigo_sap,
+                ean: item.ean,
+                conteo_4: conteo4 === '' ? null : conteo4
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (!data.success) {
+                alert(`Error: ${data.message || 'No se pudo guardar el detalle'}`);
+                return;
+            }
+            detalleEditingIndex = null;
+            verDetalle(item.numero_conteo);
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error al guardar detalle:', error);
+            alert('Error al guardar el detalle.');
+        });
+    }
+
+    function renderizarAuditoria(registros) {
+        const tbody = document.getElementById('auditoriaTableBody');
+        const tabla = document.getElementById('auditoriaTablaContainer');
+        const empty = document.getElementById('auditoriaEmpty');
+        if (!registros.length) {
+            tbody.innerHTML = '';
+            tabla.style.display = 'none';
+            empty.style.display = 'block';
+            return;
+        }
+        tbody.innerHTML = registros.map(item => `
+            <tr>
+                <td>${escapeHtml(item.fecha_modificacion || '')}</td>
+                <td>${escapeHtml(item.nombre_usuario || '')}</td>
+                <td>${escapeHtml(item.cedula_usuario || '')}</td>
+                <td>${escapeHtml(item.proceso || '')}</td>
+                <td>${escapeHtml(item.codigo_sap || '')}</td>
+                <td>${escapeHtml(item.ean || '')}</td>
+                <td class="numero-cell">${escapeHtml(item.conteo_anterior ?? '')}</td>
+                <td class="numero-cell">${escapeHtml(item.conteo_nueva ?? '')}</td>
+                <td>${escapeHtml(item.almacen || '')}</td>
+            </tr>
+        `).join('');
+        empty.style.display = 'none';
+        tabla.style.display = 'block';
+    }
+
+    function filtrarAuditoriaPorEan() {
+        const filtro = document.getElementById('auditoriaFiltroEan').value.trim().toLowerCase();
+        const filtrados = filtro
+            ? auditoriaData.filter(item => String(item.ean || '').toLowerCase().includes(filtro))
+            : auditoriaData;
+        renderizarAuditoria(filtrados);
+    }
+
+    function abrirAuditoria() {
+        if (!currentNumeroConteo) {
+            alert('Primero seleccione un conteo para ver su auditoría.');
+            return;
+        }
+        const modal   = document.getElementById('modalAuditoria');
+        const loading = document.getElementById('auditoriaLoading');
+        const empty   = document.getElementById('auditoriaEmpty');
+        const tabla   = document.getElementById('auditoriaTablaContainer');
+
+        document.getElementById('auditoriaModalTitulo').textContent = `Auditoría del Conteo ${currentNumeroConteo}`;
+        document.getElementById('auditoriaFiltroEan').value = '';
+        modal.style.display = 'block';
+        loading.style.display = 'block';
+        empty.style.display = 'none';
+        tabla.style.display = 'none';
+        document.getElementById('auditoriaTableBody').innerHTML = '';
+
+        fetch(`/auditoria-verifica-segundo-conteo/${encodeURIComponent(currentNumeroConteo)}/`)
+            .then(r => r.json())
+            .then(data => {
+                loading.style.display = 'none';
+                if (!data.success) {
+                    alert(data.message || 'Error al cargar la auditoría');
+                    return;
+                }
+                auditoriaData = data.auditoria || [];
+                renderizarAuditoria(auditoriaData);
+            })
+            .catch(err => {
+                loading.style.display = 'none';
+                alert('Error al consultar la auditoría: ' + err.message);
+            });
+    }
+
+    function cerrarAuditoria() {
+        document.getElementById('modalAuditoria').style.display = 'none';
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log('✅ Verifica Segundo Conteo - Página cargada');
+    });
+</script>
+
+<style>
+    .btn {
+        padding: 8px 12px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        font-size: 11px;
+        height: 32px;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+    }
+
+    .btn-icon {
+        width: 27px;
+        height: 27px;
+        padding: 0;
+        border: none;
+        background: #052F62;
+        cursor: pointer;
+        border-radius: 6px;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
+        font-size: 1em;
+    }
+
+    .btn-icon i {
+        font-size: 1em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-icon:hover {
+        background: #031B38;
+        transform: translateY(-2px);
+    }
+
+    .btn-success {
+        background: #198754;
+    }
+
+    .btn-success:hover {
+        background: #146c43;
+    }
+
+    .btn-danger {
+        background: #950404;
+    }
+
+    .btn-danger:hover {
+        background: #700202;
+    }
+
+    .detail-card {
+        margin-top: 15px;
+    }
+
+    .detail-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .detail-header h2 {
+        margin-bottom: 0;
+    }
+
+    .detail-count {
+        color: #052F62;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .detail-filters {
+        display: flex;
+        align-items: flex-end;
+        gap: 16px;
+        margin-bottom: 12px;
+    }
+
+    .detail-filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        width: min(100%, 260px);
+    }
+
+    .detail-filter-group label {
+        color: #333;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    #detalleFiltroEan {
+        width: 100%;
+        height: 34px;
+        box-sizing: border-box;
+    }
+
+    .detail-table {
+        min-width: 1700px;
+    }
+
+    .detail-table th:nth-child(6),
+    .detail-table td:nth-child(6) {
+        width: 200px;
+        max-width: 200px;
+        white-space: normal;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        vertical-align: top;
+    }
+
+    .inline-edit-input {
+        width: 100%;
+        min-width: 80px;
+        height: 28px;
+        padding: 5px 8px;
+        border: 1px solid #cbd3dc;
+        border-radius: 5px;
+        font-size: 11px;
+        box-sizing: border-box;
+    }
+
+    .inline-edit-observation {
+        min-width: 180px;
+    }
+
+    .pagination-footer {
+        align-items: center;
+        justify-content: flex-end;
+        gap: 26px;
+        padding: 16px 4px 4px;
+        color: #68727e;
+        font-size: 14px;
+    }
+
+    .pagination-summary {
+        margin-right: auto;
+        white-space: nowrap;
+    }
+
+    .pagination-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .pagination-pages {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .pagination-btn,
+    .pagination-page {
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: transparent;
+        color: #68727e;
+        border-radius: 50%;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        transition: all 0.2s ease;
+    }
+
+    .pagination-btn:hover:not(:disabled),
+    .pagination-page:hover {
+        background: #eef6fd;
+        color: #052F62;
+    }
+
+    .pagination-btn:disabled {
+        color: #b6bec7;
+        cursor: not-allowed;
+    }
+
+    .pagination-page.active {
+        background: #dff0ff;
+        color: #4d5966;
+        font-weight: 600;
+    }
+
+    .pagination-size {
+        width: 70px;
+        height: 40px;
+        border: 1px solid #cbd3dc;
+        border-radius: 6px;
+        color: #4d5966;
+        font-size: 14px;
+        padding-left: 14px;
+    }
+
+    .status-badge {
+        padding: 3px 6px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 500;
+    }
+
+    .status-segundo_conteo {
+        background: #d1ecf1;
+        color: #0c5460;
+        font-weight: 600;
+    }
+
+    .form-control {
+        padding: 8px 10px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        font-size: 12px;
+        transition: all 0.2s ease;
+        background: white;
+        height: 30px;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: #052F62;
+        box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+    }
+
+    .table-responsive {
+        overflow-x: auto;
+    }
+
+    .card {
+        background: white;
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 15px;
+    }
+
+    .card h2 {
+        color: #333;
+        margin-bottom: 12px;
+        font-size: 16px;
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+    }
+
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-left: 4px solid #052F62;
+        transition: all 0.3s ease;
+    }
+
+    .stat-card h3 {
+        font-size: 2em;
+        margin: 0;
+        color: #052F62;
+        font-weight: bold;
+    }
+
+    .stat-card small {
+        color: #666;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+        font-size: 11px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid #e4e4e4;
+    }
+
+    .data-table th {
+        background: #f8f9fa;
+        font-weight: 600;
+        font-size: 11px;
+    }
+
+    .data-table tr:hover {
+        background: #f8f9fa;
+    }
+
+    .content-header {
+        margin-bottom: 20px;
+    }
+
+    .content-header h1 {
+        color: #ffffffff;
+        margin: 0 0 8px 0;
+        font-size: 20px;
+    }
+
+    .content-header p {
+        color: #e4e4e4ff;
+        margin: 0;
+        font-size: 12px;
+    }
+
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.7);
+        z-index: 9999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(3px);
+    }
+
+    .loading-spinner {
+        text-align: center;
+        background: white;
+        padding: 25px 40px;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+    }
+
+    .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #052F62;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .loading-spinner p {
+        margin: 0;
+        color: #333;
+        font-weight: 600;
+        font-size: 14px;
+    }
+
+    @media (max-width: 768px) {
+        .data-table {
+            font-size: 10px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 6px;
+        }
+
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media screen and (max-width: 1024px) and (max-height: 768px) {
+        .data-table {
+            font-size: 9px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 5px 6px;
+        }
+
+        .btn {
+            padding: 5px 8px;
+            font-size: 9px;
+            height: 26px;
+        }
+    }
+
+    /* Modal Auditoría */
+    .modal {
+        position: fixed;
+        z-index: 9000;
+        left: 0; top: 0;
+        width: 100%; height: 100%;
+        background: rgba(0,0,0,0.55);
+        overflow: auto;
+    }
+
+    .modal-content {
+        background: #fff;
+        margin: 5% auto;
+        border-radius: 10px;
+        width: min(1200px, 95vw);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+
+    .modal-auditoria {
+        max-width: 1200px;
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        border-bottom: 1px solid #e4e4e4;
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        font-size: 16px;
+        color: #333;
+    }
+
+    .modal-body {
+        padding: 16px 20px;
+    }
+
+    .modal-footer {
+        padding: 12px 20px;
+        border-top: 1px solid #e4e4e4;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .modal .close {
+        font-size: 24px;
+        cursor: pointer;
+        color: #666;
+        line-height: 1;
+    }
+
+    .modal .close:hover {
+        color: #333;
+    }
+
+    .auditoria-table {
+        min-width: 1100px;
+    }
+
+    .numero-cell {
+        text-align: right;
+    }
+
+    .btn-auditoria {
+        background: #052F62;
+        color: #fff;
+        width: auto;
+        display: inline-flex;
+    }
+
+    .btn-auditoria:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-modal-cerrar {
+        background: #052F62;
+        color: #fff;
+        width: auto;
+        display: inline-flex;
+    }
+
+    .btn-modal-cerrar:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .auditoria-filter-row {
+        margin-bottom: 12px;
+    }
+</style>
+{% endblock %}

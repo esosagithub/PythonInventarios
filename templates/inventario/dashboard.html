@@ -92,6 +92,13 @@
                         </a>
                     </li>
                     {% endif %}
+                    {% if perfil == "JEFE DE TIENDA" %}
+                    <li class="menu-item">
+                        <a href="{% url 'verifica_segundo_conteo' %}">
+                            <span>Verifica Segundo Conteo</span>
+                        </a>
+                    </li>
+                    {% endif %}
                     {% if perfil != "ADMINISTRATIVO" %}
                     <li class="menu-item">
                         <a href="{% url 'acta_preliminar' %}">

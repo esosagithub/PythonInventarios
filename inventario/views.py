@@ -19,7 +19,314 @@ import oracledb
 import oracledb as cx_Oracle
 import os
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 import time
+
+
+def _perfil_nombre(request):
+    perfil = request.session.get('perfil_seleccionado', {})
+    if isinstance(perfil, dict):
+        return perfil.get('nombre', '')
+    return str(perfil or '')
+
+
+def _normalizar_tiendas(datos):
+    tiendas = []
+    if not isinstance(datos, list):
+        return tiendas
+
+    for tienda in datos:
+        centro = str(tienda.get('centro', '') or '').strip()
+        codigo = str(
+            tienda.get('mcu')
+            or tienda.get('almacen')
+            or tienda.get('tienda_codigo')
+            or ''
+        ).strip()
+        if not centro or not codigo:
+            continue
+
+        tiendas.append({
+            'centro': centro,
+            'mcu': codigo,
+            'almacen': codigo,
+            'pais': str(tienda.get('pais', '') or '').strip(),
+            'ceco': str(tienda.get('ceco', '') or '').strip(),
+            'unidad_negocio': str(
+                tienda.get('UNIDAD_NEGOCIO')
+                or tienda.get('unidad_negocio')
+                or ''
+            ).strip(),
+            'cedula': str(tienda.get('cedula', '') or '').strip(),
+            'nomina_nom': str(tienda.get('nomina_nom', '') or '').strip(),
+            'nomina_ape': str(tienda.get('nomina_ape', '') or '').strip(),
+        })
+
+    return tiendas
+
+
+def _consultar_tiendas_colaborador(cedula):
+    response = requests.post(
+        'https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getDatoTiendaColabroador',
+        headers={'Content-Type': 'application/json'},
+        data=json.dumps({'cedula': cedula}),
+        timeout=10
+    )
+    response.raise_for_status()
+    datos = response.json()
+    print(
+        "[ALCANCE_TIENDA] Respuesta getDatoTiendaColabroador: "
+        f"{datos!r}"
+    )
+    return _normalizar_tiendas(datos)
+
+
+def _asignaciones_tienda_jefe(request):
+    """Return the exact (centro, almacen) pairs assigned to the current manager."""
+    if hasattr(request, '_asignaciones_tienda_jefe'):
+        return request._asignaciones_tienda_jefe
+
+    usuario = request.session.get('usuario', {})
+    cedula = str(usuario.get('cedula', '') or '').strip()
+    asignaciones = []
+    print(f"[ALCANCE_TIENDA] Consultando tienda para cedula: {cedula!r}")
+
+    tiendas = usuario.get('tiendas_asignadas')
+    if tiendas is not None:
+        tiendas = _normalizar_tiendas(tiendas)
+        print(
+            "[ALCANCE_TIENDA] Tiendas recuperadas desde sesion: "
+            f"{tiendas!r}"
+        )
+    elif cedula:
+        try:
+            tiendas = _consultar_tiendas_colaborador(cedula)
+        except Exception as e:
+            print(
+                "[ALCANCE_TIENDA] Error obteniendo asignaciones para "
+                f"{cedula!r}: {e}"
+            )
+            tiendas = []
+
+    for tienda in tiendas or []:
+        centro = tienda['centro']
+        almacen = tienda['mcu']
+        print(
+            "[ALCANCE_TIENDA] Registro normalizado: "
+            f"centro={centro!r}, mcu/almacen={almacen!r}, "
+            f"unidad_negocio={tienda.get('unidad_negocio')!r}"
+        )
+        asignacion = (centro, almacen)
+        if asignacion not in asignaciones:
+            asignaciones.append(asignacion)
+
+    request._asignaciones_tienda_jefe = asignaciones
+    print(f"[ALCANCE_TIENDA] Asignaciones normalizadas: {asignaciones!r}")
+    return asignaciones
+
+
+def _imprimir_query_alcance(etiqueta, query, params, filas=None):
+    print(f"\n[QUERY_ALCANCE:{etiqueta}] SQL:")
+    print(query.strip())
+    print(f"[QUERY_ALCANCE:{etiqueta}] PARAMETROS: {params!r}")
+    if filas is not None:
+        print(f"[QUERY_ALCANCE:{etiqueta}] FILAS RETORNADAS: {filas}")
+
+
+def _filtro_conteos_usuario(request, alias='', admin_global=False):
+    """
+    Build the visibility predicate for inventory headers.
+
+    Store managers are scoped by exact store assignment. Other profiles keep
+    the historical owner scope unless an administrative action requests global
+    validation explicitly.
+    """
+    prefix = f"{alias}." if alias else ''
+    perfil = _perfil_nombre(request)
+
+    if perfil == 'ADMINISTRATIVO' and admin_global:
+        return '1=1', []
+
+    if perfil == 'JEFE DE TIENDA':
+        asignaciones = _asignaciones_tienda_jefe(request)
+        if not asignaciones:
+            print(
+                "[ALCANCE_TIENDA] JEFE DE TIENDA sin asignaciones; "
+                "se aplicara el filtro 1=0"
+            )
+            return '1=0', []
+
+        condiciones = []
+        params = []
+        for centro, almacen in asignaciones:
+            condiciones.append(
+                f"({prefix}centro = %s AND {prefix}almacen = %s)"
+            )
+            params.extend([centro, almacen])
+        filtro = f"({' OR '.join(condiciones)})"
+        print(f"[ALCANCE_TIENDA] Filtro generado: {filtro}")
+        print(f"[ALCANCE_TIENDA] Parametros de tienda: {params!r}")
+        return filtro, params
+
+    cedula = request.session.get('usuario', {}).get('cedula', '')
+    return f"{prefix}usuario_responsable = %s", [cedula]
+
+
+def _puede_acceder_tienda(request, centro, almacen):
+    perfil = _perfil_nombre(request)
+    if perfil == 'ADMINISTRATIVO':
+        return True
+    if perfil == 'JEFE DE TIENDA':
+        tienda = (
+            str(centro or '').strip(),
+            str(almacen or '').strip()
+        )
+        return tienda in _asignaciones_tienda_jefe(request)
+    return False
+
+
+def _puede_acceder_almacen(request, almacen):
+    perfil = _perfil_nombre(request)
+    if perfil == 'ADMINISTRATIVO':
+        return True
+    if perfil == 'JEFE DE TIENDA':
+        almacen = str(almacen or '').strip()
+        return any(
+            almacen == almacen_asignado
+            for _, almacen_asignado in _asignaciones_tienda_jefe(request)
+        )
+    return True
+
+
+def _puede_acceder_piqueo(request, piqueo_id, cursor=None):
+    filtro, params = _filtro_conteos_usuario(
+        request, 'p', admin_global=True
+    )
+    query = f"""
+        SELECT 1
+        FROM INV_PIQUEOS_INVENTARIO_TBL p
+        WHERE p.piqueo_id = %s
+          AND {filtro}
+    """
+    query_params = [piqueo_id, *params]
+
+    if cursor is not None:
+        cursor.execute(query, query_params)
+        return cursor.fetchone() is not None
+
+    with connection.cursor() as local_cursor:
+        local_cursor.execute(query, query_params)
+        return local_cursor.fetchone() is not None
+
+
+def _puede_acceder_detalle(request, detalle_piqueo_id, cursor=None):
+    filtro, params = _filtro_conteos_usuario(
+        request, 'p', admin_global=True
+    )
+    query = f"""
+        SELECT 1
+        FROM INV_DETALLE_PIQUEOS_INVENTARIOS_TBL d
+        JOIN INV_PIQUEOS_INVENTARIO_TBL p ON p.piqueo_id = d.piqueo_id
+        WHERE d.detalle_piqueo_id = %s
+          AND {filtro}
+    """
+    query_params = [detalle_piqueo_id, *params]
+
+    if cursor is not None:
+        cursor.execute(query, query_params)
+        return cursor.fetchone() is not None
+
+    with connection.cursor() as local_cursor:
+        local_cursor.execute(query, query_params)
+        return local_cursor.fetchone() is not None
+
+
+def _puede_acceder_secuencial(request, secuencial_id, detalle=False, cursor=None):
+    tabla = (
+        'INV_PIQUEO_SECUENCIAL_DETA_TBL'
+        if detalle else
+        'INV_PIQUEO_SECUENCIAL_TBL'
+    )
+    campo = 'SECUENCIAL_DETA_ID' if detalle else 'SECUENCIAL_ID'
+    filtro, params = _filtro_conteos_usuario(
+        request, 'p', admin_global=True
+    )
+    query = f"""
+        SELECT 1
+        FROM {tabla} s
+        JOIN INV_DETALLE_PIQUEOS_INVENTARIOS_TBL d
+          ON d.detalle_piqueo_id = s.detalle_piqueo_id
+        JOIN INV_PIQUEOS_INVENTARIO_TBL p ON p.piqueo_id = d.piqueo_id
+        WHERE s.{campo} = %s
+          AND {filtro}
+    """
+    query_params = [secuencial_id, *params]
+
+    if cursor is not None:
+        cursor.execute(query, query_params)
+        return cursor.fetchone() is not None
+
+    with connection.cursor() as local_cursor:
+        local_cursor.execute(query, query_params)
+        return local_cursor.fetchone() is not None
+
+
+def _puede_acceder_numero_conteo(request, numero_conteo, almacen=None, cursor=None):
+    filtro, params = _filtro_conteos_usuario(
+        request, 'p', admin_global=True
+    )
+    query = f"""
+        SELECT 1
+        FROM INV_PIQUEOS_INVENTARIO_TBL p
+        WHERE p.numero_conteo = %s
+          AND {filtro}
+    """
+    query_params = [numero_conteo, *params]
+    if almacen:
+        query += " AND p.almacen = %s"
+        query_params.append(almacen)
+
+    if cursor is not None:
+        cursor.execute(query, query_params)
+        return cursor.fetchone() is not None
+
+    with connection.cursor() as local_cursor:
+        local_cursor.execute(query, query_params)
+        return local_cursor.fetchone() is not None
+
+
+def _puede_acceder_seccion(request, section_name, cursor=None):
+    if not section_name:
+        return False
+
+    filtro, params = _filtro_conteos_usuario(
+        request, 'p', admin_global=True
+    )
+    query = f"""
+        SELECT 1
+        FROM INV_PIQUEO_SECUENCIAL_DETA_TBL sd
+        JOIN INV_DETALLE_PIQUEOS_INVENTARIOS_TBL d
+          ON d.detalle_piqueo_id = sd.detalle_piqueo_id
+        JOIN INV_PIQUEOS_INVENTARIO_TBL p ON p.piqueo_id = d.piqueo_id
+        WHERE sd.codigo = %s
+          AND {filtro}
+    """
+    query_params = [section_name, *params]
+
+    if cursor is not None:
+        cursor.execute(query, query_params)
+        return cursor.fetchone() is not None
+
+    with connection.cursor() as local_cursor:
+        local_cursor.execute(query, query_params)
+        return local_cursor.fetchone() is not None
+
+
+def _respuesta_sin_acceso():
+    return JsonResponse(
+        {'success': False, 'message': 'No tiene acceso a este conteo'},
+        status=403
+    )
 
 
 @csrf_exempt
@@ -74,17 +381,52 @@ def custom_login(request):
                 print(f"Usuario activo: {usuario_activo}")  # Debug
 
                 if usuario_activo:
+                    colaborador = response_data.get('colaboradr', {})
+                    tiendas_asignadas = []
+                    try:
+                        tiendas_asignadas = _consultar_tiendas_colaborador(
+                            username
+                        )
+                    except Exception as e:
+                        print(
+                            "[LOGIN] No se pudo recuperar el codigo de tienda "
+                            f"para {username!r}: {e}"
+                        )
+
+                    tienda_principal = (
+                        tiendas_asignadas[0] if tiendas_asignadas else {}
+                    )
+                    unidad_negocio = str(
+                        colaborador.get('UNIDAD_NEGOCIO')
+                        or tienda_principal.get('unidad_negocio')
+                        or ''
+                    ).strip()
+
                     # Guardar datos del usuario en sesión - CORRECCIÓN IMPORTANTE
                     request.session['usuario'] = {
                         'cedula': username,
                         'identificacion': username,
-                        'nombre': response_data.get('colaboradr', {}).get('COLABORADOR', ''),
-                        'empresa': response_data.get('colaboradr', {}).get('EMPRESA', ''),
-                        'cargo': response_data.get('colaboradr', {}).get('CARGO', ''),
-                        'email': response_data.get('colaboradr', {}).get('CORREO_EMPRESARIAL', ''),
-                        'region': response_data.get('colaboradr', {}).get('REGION', ''),
+                        'nombre': colaborador.get('COLABORADOR', ''),
+                        'empresa': colaborador.get('EMPRESA', ''),
+                        'cargo': colaborador.get('CARGO', ''),
+                        'email': colaborador.get('CORREO_EMPRESARIAL', ''),
+                        'region': colaborador.get('REGION', ''),
+                        'unidad_negocio': unidad_negocio,
+                        'tienda_codigo': tienda_principal.get('mcu', ''),
+                        'mcu': tienda_principal.get('mcu', ''),
+                        'almacen': tienda_principal.get('mcu', ''),
+                        'centro': tienda_principal.get('centro', ''),
+                        'centro_costo': tienda_principal.get('ceco', ''),
+                        'pais': tienda_principal.get('pais', ''),
+                        'tiendas_asignadas': tiendas_asignadas,
                         'activo': True
                     }
+                    print(
+                        "[LOGIN] Tienda guardada en sesion: "
+                        f"unidad_negocio={unidad_negocio!r}, "
+                        f"centro={tienda_principal.get('centro', '')!r}, "
+                        f"mcu={tienda_principal.get('mcu', '')!r}"
+                    )
 
                     if is_ajax:
                         # Responder con JSON para AJAX
@@ -577,28 +919,16 @@ def administracion_conteo_jefe(request):
     print(
         f"👤 [JEFE] Usuario logueado: {usuario_nombre} (Cédula: {usuario_cedula})")
 
-    # OBTENER DATOS DE LA TIENDA DEL JEFE DEL WEB SERVICE
-    datos_tienda_jefe = []
-    if usuario_cedula:
+    # Obtener los datos de tienda guardados durante el login.
+    datos_tienda_jefe = _normalizar_tiendas(
+        usuario_sesion.get('tiendas_asignadas', [])
+    )
+    if not datos_tienda_jefe and usuario_cedula:
         try:
-            # Consumir web service para obtener datos de la tienda del jefe
-            url = 'https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getDatoTiendaColabroador'
-            payload = {
-                "cedula": usuario_cedula
-            }
-            headers = {
-                'Content-Type': 'application/json'
-            }
-
-            response = requests.post(
-                url, headers=headers, data=json.dumps(payload), timeout=10)
-            response_data = response.json()
-
-            print(
-                f"🏪 [JEFE] Respuesta del web service de tienda: {response_data}")
-
-            if response_data and isinstance(response_data, list):
-                datos_tienda_jefe = response_data
+            datos_tienda_jefe = _consultar_tiendas_colaborador(
+                usuario_cedula
+            )
+            if datos_tienda_jefe:
                 print(
                     f"✅ [JEFE] Datos de tienda encontrados: {len(datos_tienda_jefe)} registros")
             else:
@@ -614,19 +944,22 @@ def administracion_conteo_jefe(request):
         print("❌ [JEFE] No se encontró cédula en la sesión")
         messages.error(request, 'No se pudo identificar su cédula de usuario')
 
-    # EXTRAER CENTROS Y ALMACENES ASIGNADOS AL JEFE
-    centros_asignados = []
-    almacenes_asignados = []
-
-    for tienda in datos_tienda_jefe:
-        centro = tienda.get('centro', '')
-        almacen = tienda.get('almacen', '')
-
-        if centro and centro not in centros_asignados:
-            centros_asignados.append(centro)
-
-        if almacen and almacen not in almacenes_asignados:
-            almacenes_asignados.append(almacen)
+    # Conservar las parejas exactas para no mezclar centros y almacenes.
+    request._asignaciones_tienda_jefe = list(dict.fromkeys(
+        (
+            str(tienda.get('centro', '') or '').strip(),
+            str(tienda.get('mcu', '') or '').strip()
+        )
+        for tienda in datos_tienda_jefe
+        if tienda.get('centro') and tienda.get('mcu')
+    ))
+    asignaciones_tienda = _asignaciones_tienda_jefe(request)
+    centros_asignados = list(dict.fromkeys(
+        centro for centro, _ in asignaciones_tienda
+    ))
+    almacenes_asignados = list(dict.fromkeys(
+        almacen for _, almacen in asignaciones_tienda
+    ))
 
     print(f"📍 [JEFE] Centros asignados: {centros_asignados}")
     print(f"📍 [JEFE] Almacenes asignados: {almacenes_asignados}")
@@ -685,17 +1018,11 @@ def administracion_conteo_jefe(request):
 
             params = []
 
-            # FILTRAR POR CENTROS ASIGNADOS AL JEFE
-            if centros_asignados:
-                placeholders = ','.join(['%s'] * len(centros_asignados))
-                base_query += f" AND pi.centro IN ({placeholders})"
-                params.extend(centros_asignados)
-            else:
-                # Si no hay centros asignados, no mostrar ningún conteo
-                base_query += " AND 1=0"
-
-            base_query += " AND pi.usuario_responsable = %s"
-            params.append(usuario_cedula)
+            filtro_tienda, params_tienda = _filtro_conteos_usuario(
+                request, 'pi'
+            )
+            base_query += f" AND {filtro_tienda}"
+            params.extend(params_tienda)
             # APLICAR FILTROS ADICIONALES DINÁMICAMENTE
             if filtros.get('estado'):
                 base_query += " AND UPPER(pi.estado) = UPPER(%s)"
@@ -719,11 +1046,17 @@ def administracion_conteo_jefe(request):
 
             base_query += " ORDER BY pi.fecha_creacion DESC"
 
-            print(f"🔍 [JEFE] Query ejecutado: {base_query}")
-            print(f"🔍 [JEFE] Parámetros: {params}")
-
+            _imprimir_query_alcance(
+                'ADMINISTRACION_CONTEO_JEFE', base_query, params
+            )
             cursor.execute(base_query, params)
             resultados = cursor.fetchall()
+            _imprimir_query_alcance(
+                'ADMINISTRACION_CONTEO_JEFE',
+                base_query,
+                params,
+                len(resultados)
+            )
 
             print(f"🔍 [JEFE] Filtros aplicados: {filtros}")
             print(f"📊 [JEFE] Número de conteos encontrados: {len(resultados)}")
@@ -814,6 +1147,9 @@ def aprobar_rechazar_conteo(request, piqueo_id):
 
     if request.method != 'POST':
         return JsonResponse({'success': False, 'message': 'Método no permitido'})
+
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        return _respuesta_sin_acceso()
 
     try:
         data = json.loads(request.body)
@@ -923,27 +1259,30 @@ def nuevo_conteo_jefe(request):
 
     print(f"🔍 [NUEVO_CONTEO_JEFE] Cédula del jefe: {cedula_jefe}")
 
-    if cedula_jefe:
+    tiendas_sesion = _normalizar_tiendas(
+        usuario_sesion.get('tiendas_asignadas', [])
+    )
+    if tiendas_sesion:
+        datos_jefe = dict(tiendas_sesion[0])
+        datos_jefe.update({
+            'cedula': cedula_jefe,
+            'nomina_nom': usuario_sesion.get('nombre', ''),
+            'nomina_ape': '',
+        })
+        print(
+            "[NUEVO_CONTEO_JEFE] Datos recuperados desde sesion: "
+            f"{datos_jefe!r}"
+        )
+    elif cedula_jefe:
         try:
-            # Consumir web service para obtener datos del jefe
-            url = 'https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getDatoTiendaColabroador'
-            payload = {
-                "cedula": cedula_jefe
-            }
-            headers = {
-                'Content-Type': 'application/json'
-            }
-
-            response = requests.post(
-                url, headers=headers, data=json.dumps(payload), timeout=10)
-            response_data = response.json()
-
-            print(
-                f"📋 [NUEVO_CONTEO_JEFE] Respuesta completa del web service: {response_data}")
-
-            if response_data and isinstance(response_data, list) and len(response_data) > 0:
-                # Tomar el primer elemento del array
-                datos_jefe = response_data[0]
+            tiendas = _consultar_tiendas_colaborador(cedula_jefe)
+            if tiendas:
+                datos_jefe = dict(tiendas[0])
+                datos_jefe.update({
+                    'cedula': cedula_jefe,
+                    'nomina_nom': usuario_sesion.get('nombre', ''),
+                    'nomina_ape': '',
+                })
                 print(
                     f"✅ [NUEVO_CONTEO_JEFE] Datos del jefe encontrados: {datos_jefe}")
 
@@ -1038,6 +1377,11 @@ def guardar_conteo_jefe(request):
             usuario_creacion = usuario_sesion.get(
                 'nombre', 'Usuario no identificado')
             cedula_usuario = usuario_sesion.get('cedula', '')
+            if not _puede_acceder_tienda(
+                request, form_data['centro'], form_data['almacen']
+            ):
+                return _respuesta_sin_acceso()
+            form_data['usuario_responsable'] = cedula_usuario
 
             print(f"Jefe creando conteo: {usuario_creacion}")  # Debug
 
@@ -1264,6 +1608,9 @@ def detalle_conteo(request, piqueo_id):
     if request.method != 'GET':
         return JsonResponse({'error': 'Método no permitido'}, status=405)
 
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        return _respuesta_sin_acceso()
+
     try:
         detalles = []
         info_conteo = {}
@@ -1395,22 +1742,13 @@ def eliminar_conteo(request, conteo_id):
     if 'usuario' not in request.session:
         return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
-    # Si usuario_creacion guarda el nombre
-    usuario = request.session['usuario'].get('nombre', '')
-
     if perfil not in ["ADMINISTRATIVO", "JEFE DE TIENDA"]:
         return JsonResponse({'success': False, 'message': 'No tiene permisos'}, status=403)
     if request.method != 'POST':
         return JsonResponse({'success': False, 'message': 'Método no permitido'}, status=405)
 
-    # Verificar permisos para jefe de tienda
-    if perfil == "JEFE DE TIENDA":
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT usuario_creacion FROM INV_PIQUEOS_INVENTARIO_TBL WHERE piqueo_id = %s", [conteo_id])
-            row = cursor.fetchone()
-            if not row or row[0] != usuario:
-                return JsonResponse({'success': False, 'message': 'Solo puede eliminar sus propios conteos'}, status=403)
+    if not _puede_acceder_piqueo(request, conteo_id):
+        return _respuesta_sin_acceso()
 
     try:
         with connection.cursor() as cursor:
@@ -1429,9 +1767,6 @@ def gestion_conteos(request):
         return redirect('login')
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
-    usuario_sesion = request.session.get('usuario', {})
-    usuario_cedula = usuario_sesion.get('cedula', '')
-
     # OBTENER FILTROS (GET o POST/AJAX)
     filtros = {}
     if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -1446,14 +1781,14 @@ def gestion_conteos(request):
         filtros['almacen'] = request.GET.get('almacen', '').strip()
 
     with connection.cursor() as cursor:
-        query = """
+        filtro_acceso, params = _filtro_conteos_usuario(request)
+        query = f"""
             SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
             nombre_empleado_func(usuario_responsable) as nm_responsable, 
             usuario_creacion, centro, almacen
             FROM INV_PIQUEOS_INVENTARIO_TBL
-            WHERE usuario_responsable = %s
+            WHERE {filtro_acceso}
         """
-        params = [usuario_cedula]
 
         # APLICAR FILTROS DINÁMICAMENTE
         if filtros.get('estado'):
@@ -1470,10 +1805,12 @@ def gestion_conteos(request):
 
         query += " ORDER BY fecha_inicio DESC"
 
-        print(f"🔍 Query ejecutado: {query}")
-        print(f"🔍 Parámetros: {params}")
+        _imprimir_query_alcance('GESTION_CONTEOS', query, params)
         cursor.execute(query, params)
         rows = cursor.fetchall()
+        _imprimir_query_alcance(
+            'GESTION_CONTEOS', query, params, len(rows)
+        )
 
     conteos = [
         {
@@ -1520,6 +1857,10 @@ def asigna_conteo_colaborador(request, piqueo_id):
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
     usuario = request.session['usuario'].get('nombre', '')
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        messages.error(request, 'No tiene acceso a este conteo')
+        return redirect('gestion_conteos')
+
     print(f"Buscando artículos para PIQUEO_ID: {piqueo_id}")
     # Procesa los artículos dentro del bloque 'with'
     with connection.cursor() as cursor:
@@ -1570,9 +1911,14 @@ def asigna_conteo_colaborador(request, piqueo_id):
 
 @csrf_exempt
 def obtener_colaboradores(request):
+    if 'usuario' not in request.session:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+
     almacen = request.GET.get('almacen')
     if not almacen:
         return JsonResponse({'error': 'Falta el parámetro almacen'}, status=400)
+    if not _puede_acceder_almacen(request, almacen):
+        return _respuesta_sin_acceso()
     url = 'https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/colaboradores'
     payload = {"mcu": almacen}
     headers = {'Content-Type': 'application/json'}
@@ -1587,10 +1933,24 @@ def obtener_colaboradores(request):
 
 @csrf_exempt
 def guardar_colaboradores(request):
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
             colaboradores = data.get('colaboradores', [])
+            piqueo_ids = {
+                int(col['idConteo'])
+                for col in colaboradores
+                if col.get('idConteo')
+            }
+            if not piqueo_ids or any(
+                not _puede_acceder_piqueo(request, piqueo_id)
+                for piqueo_id in piqueo_ids
+            ):
+                return _respuesta_sin_acceso()
+
             with connection.cursor() as cursor:
                 for col in colaboradores:
                     print("Insertando colaborador:", [
@@ -1656,6 +2016,11 @@ def validar_colaborador_disponible(request):
 
 
 def obtener_colaboradores_piqueo(request, piqueo_id):
+    if 'usuario' not in request.session:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        return _respuesta_sin_acceso()
+
     with connection.cursor() as cursor:
         cursor.execute("""
             SELECT EMPLEADO_ID, CEDULA, NOMBRES, CARGO, TIENDA
@@ -1679,6 +2044,9 @@ def obtener_colaboradores_piqueo(request, piqueo_id):
 
 @csrf_exempt
 def eliminar_colaborador_piqueo(request):
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
@@ -1686,6 +2054,17 @@ def eliminar_colaborador_piqueo(request):
             if not empleado_id:
                 return JsonResponse({'success': False, 'message': 'ID no proporcionado'})
             with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT PIQUEO_ID
+                    FROM MS_INVENTARIOS.INV_PIQUEO_COLABORADORES_TBL
+                    WHERE EMPLEADO_ID = %s
+                """, [empleado_id])
+                row = cursor.fetchone()
+                if not row or not _puede_acceder_piqueo(
+                    request, row[0], cursor
+                ):
+                    return _respuesta_sin_acceso()
+
                 cursor.execute("""
                     DELETE FROM MS_INVENTARIOS.INV_PIQUEO_COLABORADORES_TBL
                     WHERE EMPLEADO_ID = %s
@@ -1697,6 +2076,11 @@ def eliminar_colaborador_piqueo(request):
 
 
 def obtener_secuenciales(request, detalle_piqueo_id):
+    if 'usuario' not in request.session:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    if not _puede_acceder_detalle(request, detalle_piqueo_id):
+        return _respuesta_sin_acceso()
+
     with connection.cursor() as cursor:
         cursor.execute("""
             SELECT SECUENCIAL_ID, UBICACION, SECUENCIA_HASTA, CODIGO
@@ -1718,6 +2102,11 @@ def obtener_secuenciales(request, detalle_piqueo_id):
 @csrf_exempt
 def obtener_secuenciales_activos(request, detalle_piqueo_id):
     """Obtener solo los secuenciales ACTIVOS para un detalle específico"""
+    if 'usuario' not in request.session:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    if not _puede_acceder_detalle(request, detalle_piqueo_id):
+        return _respuesta_sin_acceso()
+
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -1747,11 +2136,25 @@ def obtener_secuenciales_activos(request, detalle_piqueo_id):
 
 @csrf_exempt
 def guardar_secuenciales(request):
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
     if request.method == 'POST':
         import json
         try:
             data = json.loads(request.body)
             secuenciales = data.get('secuenciales', [])
+            detalle_ids = {
+                int(sec['detalle_piqueo_id'])
+                for sec in secuenciales
+                if sec.get('detalle_piqueo_id')
+            }
+            if not detalle_ids or any(
+                not _puede_acceder_detalle(request, detalle_id)
+                for detalle_id in detalle_ids
+            ):
+                return _respuesta_sin_acceso()
+
             detalle_piqueo_id = None
             with connection.cursor() as cursor:
                 for sec in secuenciales:
@@ -1838,6 +2241,11 @@ def actualizar_secuencia_hasta(request):
                 })
 
             secuencia_actual, detalle_piqueo_id, secuencia_anterior = resultado
+            if not _puede_acceder_detalle(
+                request, detalle_piqueo_id, cursor
+            ):
+                return _respuesta_sin_acceso()
+
             secuencia_anterior = secuencia_anterior or 0  # Si es None, usar 0
 
             print(
@@ -1913,6 +2321,9 @@ def actualizar_secuencia_hasta(request):
 
 @csrf_exempt
 def eliminar_secuencial(request):
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
     if request.method == 'POST':
         import json
         try:
@@ -1928,6 +2339,10 @@ def eliminar_secuencial(request):
                 """, [secuencial_id])
                 row = cursor.fetchone()
                 detalle_piqueo_id = row[0] if row else None
+                if not detalle_piqueo_id or not _puede_acceder_detalle(
+                    request, detalle_piqueo_id, cursor
+                ):
+                    return _respuesta_sin_acceso()
 
                 # Eliminar el secuencial
                 cursor.execute("""
@@ -1947,6 +2362,11 @@ def eliminar_secuencial(request):
 
 
 def imprimir_zonas_pdf(request, detalle_piqueo_id):
+    if 'usuario' not in request.session:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    if not _puede_acceder_detalle(request, detalle_piqueo_id):
+        return _respuesta_sin_acceso()
+
     from io import BytesIO
     from reportlab.lib.units import mm
     buffer = BytesIO()
@@ -2098,6 +2518,11 @@ def _codigo_barras_svg(codigo):
 
 
 def imprimir_zonas_print(request, detalle_piqueo_id):
+    if 'usuario' not in request.session:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    if not _puede_acceder_detalle(request, detalle_piqueo_id):
+        return _respuesta_sin_acceso()
+
     with connection.cursor() as cursor:
         cursor.execute("""
             SELECT DETALLE_PIQUEO_ID, UBICACION, SECUENCIA, CODIGO, ESTADO
@@ -2154,6 +2579,13 @@ def imprimir_zonas_print(request, detalle_piqueo_id):
 
 
 def imprimir_zona_secuencia_print(request, secuencial_deta_id):
+    if 'usuario' not in request.session:
+        return JsonResponse({'error': 'No autenticado'}, status=401)
+    if not _puede_acceder_secuencial(
+        request, secuencial_deta_id, detalle=True
+    ):
+        return _respuesta_sin_acceso()
+
     with connection.cursor() as cursor:
         cursor.execute("""
             SELECT DETALLE_PIQUEO_ID, UBICACION, SECUENCIA, CODIGO, ESTADO
@@ -2268,9 +2700,6 @@ def primer_conteo(request):
         return redirect('login')
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
-    usuario_sesion = request.session.get('usuario', {})
-    usuario_cedula = usuario_sesion.get('cedula', '')
-
     # OBTENER FILTROS (GET o POST/AJAX)
     filtros = {}
     if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -2285,14 +2714,14 @@ def primer_conteo(request):
         filtros['almacen'] = request.GET.get('almacen', '').strip()
 
     with connection.cursor() as cursor:
-        query = """
+        filtro_acceso, params = _filtro_conteos_usuario(request)
+        query = f"""
             SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
             nombre_empleado_func(usuario_responsable) as nm_responsable, 
             usuario_creacion, centro, almacen
             FROM INV_PIQUEOS_INVENTARIO_TBL
-            WHERE usuario_responsable = %s
+            WHERE {filtro_acceso}
         """
-        params = [usuario_cedula]
 
         # APLICAR FILTROS DINÁMICAMENTE
         if filtros.get('estado'):
@@ -2309,10 +2738,12 @@ def primer_conteo(request):
 
         query += " ORDER BY fecha_inicio DESC"
 
-        print(f"🔍 Query ejecutado: {query}")
-        print(f"🔍 Parámetros: {params}")
+        _imprimir_query_alcance('PRIMER_CONTEO', query, params)
         cursor.execute(query, params)
         rows = cursor.fetchall()
+        _imprimir_query_alcance(
+            'PRIMER_CONTEO', query, params, len(rows)
+        )
 
     conteos = [
         {
@@ -2534,6 +2965,9 @@ def obtener_detalle_piqueo_primer_conteo(request):
         if not piqueo_id:
             return JsonResponse({'error': 'piqueo_id requerido'}, status=400)
 
+        if not _puede_acceder_piqueo(request, piqueo_id):
+            return _respuesta_sin_acceso()
+
         print(f"🔍 Buscando detalles para piqueo_id: {piqueo_id}")
 
         with connection.cursor() as cursor:
@@ -2631,6 +3065,9 @@ def obtener_barcodes_escaneo_primer_conteo(request):
         data = json.loads(request.body)
         section_name = data.get('section_name', '464mostrador1')
         codigo_filter = (data.get('codigo_filter') or '').strip()
+
+        if not _puede_acceder_seccion(request, section_name):
+            return _respuesta_sin_acceso()
 
         print(
             f"🔍 Buscando códigos de barras para section_name: {section_name}")
@@ -2785,6 +3222,9 @@ def eliminar_barcode_primer_conteo(request):
                 'message': 'Código de barras requerido'
             })
 
+        if not _puede_acceder_seccion(request, section_name):
+            return _respuesta_sin_acceso()
+
         print(f"🗑️ Eliminando código de barras: {codigo_barras}")
         print(f"📍 Section name (código): {section_name}")
 
@@ -2870,6 +3310,9 @@ def eliminar_todos_barcodes_primer_conteo(request):
                 'message': 'Section name requerido'
             })
 
+        if not _puede_acceder_seccion(request, section_name):
+            return _respuesta_sin_acceso()
+
         print(f"🗑️ Eliminando TODOS los barcodes para sección: {section_name}")
 
 
@@ -2933,6 +3376,11 @@ def eliminar_toma_primer_conteo(request):
         if not detalle_id:
             return JsonResponse({'success': False, 'message': 'detalle_id requerido'}, status=400)
 
+        if not _puede_acceder_detalle(request, detalle_id):
+            return _respuesta_sin_acceso()
+        if piqueo_id and not _puede_acceder_piqueo(request, piqueo_id):
+            return _respuesta_sin_acceso()
+
         print(f"🗑️ Eliminando toma detalle_id={detalle_id} (piqueo_id={piqueo_id})")
 
         with connection.cursor() as cursor:
@@ -2989,6 +3437,9 @@ def reprocesar_ean_primer_conteo(request):
 
         if not codigo_barras:
             return JsonResponse({'success': False, 'message': 'codigo_barras requerido'})
+
+        if not _puede_acceder_seccion(request, section_name):
+            return _respuesta_sin_acceso()
 
         # Eliminar ceros a la izquierda del código de barras
         codigo_barras_limpio = codigo_barras.lstrip('0') or '0'
@@ -3056,6 +3507,9 @@ def obtener_estadisticas_conteo(request):
 
         if not piqueo_id:
             return JsonResponse({'error': 'piqueo_id requerido'}, status=400)
+
+        if not _puede_acceder_piqueo(request, piqueo_id):
+            return _respuesta_sin_acceso()
 
         print(f"📊 Obteniendo estadísticas para piqueo_id: {piqueo_id}")
 
@@ -3213,10 +3667,10 @@ def cerrar_conteo_primer_conteo(request):
         if not piqueo_id:
             return JsonResponse({'success': False, 'message': 'piqueo_id requerido'}, status=400)
 
-        usuario = request.session.get('usuario', {})
-        cedula = usuario.get('cedula', '')
+        if not _puede_acceder_piqueo(request, piqueo_id):
+            return _respuesta_sin_acceso()
 
-        print(f"🔒 Procesando cierre de conteo {piqueo_id} para usuario: {cedula}")
+        print(f"🔒 Procesando cierre de conteo {piqueo_id}")
 
         # ========================================
         # PASO 1: VALIDACIONES PREVIAS
@@ -3239,13 +3693,6 @@ def cerrar_conteo_primer_conteo(request):
             print(f"📋 Número de conteo: {numero_conteo}")
             print(f"📊 Estado actual: {estado_actual}")
             print(f"🏪 Almacén: {almacen}")
-
-            # Verificar permisos
-            if usuario_responsable != cedula:
-                return JsonResponse({
-                    'success': False,
-                    'message': 'No tiene permisos para cerrar este conteo'
-                }, status=403)
 
             if estado_actual.upper() == 'COMPLETADO':
                 return JsonResponse({'success': False, 'message': 'El conteo ya está completado'})
@@ -3485,9 +3932,6 @@ def segundo_conteo(request):
         return redirect('login')
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
-    usuario_sesion = request.session.get('usuario', {})
-    usuario_cedula = usuario_sesion.get('cedula', '')
-
     # OBTENER FILTROS (GET o POST/AJAX)
     filtros = {}
     if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -3503,15 +3947,15 @@ def segundo_conteo(request):
 
     with connection.cursor() as cursor:
         # Query para obtener conteos con estado PRIMER_CONTEO (listos para segundo conteo)
-        query = """
+        filtro_acceso, params = _filtro_conteos_usuario(request)
+        query = f"""
             SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
             nombre_empleado_func(usuario_responsable) as nm_responsable, 
             usuario_creacion, centro, almacen
             FROM INV_PIQUEOS_INVENTARIO_TBL
-            WHERE usuario_responsable = %s
+            WHERE {filtro_acceso}
             AND UPPER(estado) IN ('PRIMER_CONTEO', 'SEGUNDO_CONTEO')
         """
-        params = [usuario_cedula]
 
         # APLICAR FILTROS DINÁMICAMENTE
         if filtros.get('estado'):
@@ -3528,10 +3972,12 @@ def segundo_conteo(request):
 
         query += " ORDER BY fecha_inicio DESC"
 
-        print(f"🔍 [SEGUNDO_CONTEO] Query ejecutado: {query}")
-        print(f"🔍 [SEGUNDO_CONTEO] Parámetros: {params}")
+        _imprimir_query_alcance('SEGUNDO_CONTEO', query, params)
         cursor.execute(query, params)
         rows = cursor.fetchall()
+        _imprimir_query_alcance(
+            'SEGUNDO_CONTEO', query, params, len(rows)
+        )
 
     conteos = [
         {
@@ -3583,25 +4029,17 @@ def finalizar_conteo(request, piqueo_id):
     if request.method != 'POST':
         return JsonResponse({'success': False, 'message': 'Método no permitido'}, status=405)
 
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        return _respuesta_sin_acceso()
+
     try:
         data = json.loads(request.body)
-        numero_conteo = data.get('numero_conteo')
-        almacen = data.get('almacen')
-
-        if not numero_conteo or not almacen:
-            return JsonResponse({
-                'success': False,
-                'message': 'Faltan parámetros: numero_conteo y almacen son requeridos'
-            }, status=400)
-
         print(f"🏁 [FINALIZAR_CONTEO] Iniciando proceso para PIQUEO_ID: {piqueo_id}")
-        print(f"📋 [FINALIZAR_CONTEO] Número de conteo: {numero_conteo}")
-        print(f"🏪 [FINALIZAR_CONTEO] Almacén: {almacen}")
 
         with connection.cursor() as cursor:
             # Verificar que el estado actual sea PRIMER_CONTEO
             cursor.execute("""
-                SELECT estado
+                SELECT estado, numero_conteo, almacen
                 FROM INV_PIQUEOS_INVENTARIO_TBL
                 WHERE piqueo_id = %s
             """, [piqueo_id])
@@ -3613,7 +4051,9 @@ def finalizar_conteo(request, piqueo_id):
                     'message': f'No se encontró el conteo con ID {piqueo_id}'
                 }, status=404)
 
-            estado_actual = result[0]
+            estado_actual, numero_conteo, almacen = result
+            print(f"📋 [FINALIZAR_CONTEO] Número de conteo: {numero_conteo}")
+            print(f"🏪 [FINALIZAR_CONTEO] Almacén: {almacen}")
             if estado_actual.upper() != 'PRIMER_CONTEO':
                 return JsonResponse({
                     'success': False,
@@ -3677,6 +4117,9 @@ def diferencias_segundo_conteo(request, piqueo_id):
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
     usuario = request.session['usuario'].get('nombre', '')
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        messages.error(request, 'No tiene acceso a este conteo')
+        return redirect('segundo_conteo')
 
     # Obtener información del conteo
     conteo = {}
@@ -3815,7 +4258,7 @@ def asignar_colaborador_diferencia(request):
         with connection.cursor() as cursor:
             # Verificar que existe la diferencia antes de actualizar
             cursor.execute("""
-                SELECT id, codigo_barras, numero_conteo
+                SELECT id, codigo_barras, numero_conteo, almacen_sistema
                 FROM inv_inventario_fisico_vs_sistema
                 WHERE id = %s
                 AND estado_comparacion = 'DIFERENCIA'
@@ -3831,7 +4274,12 @@ def asignar_colaborador_diferencia(request):
                     'message': f'No se encontró la diferencia especificada'
                 })
 
-            id_encontrado, codigo_barras, numero_conteo = resultado
+            id_encontrado, codigo_barras, numero_conteo, almacen = resultado
+            if not _puede_acceder_numero_conteo(
+                request, numero_conteo, almacen, cursor
+            ):
+                return _respuesta_sin_acceso()
+
             print(
                 f"✅ Diferencia encontrada - ID: {id_encontrado}, Código: {codigo_barras}, Conteo: {numero_conteo}")
 
@@ -3872,6 +4320,222 @@ def asignar_colaborador_diferencia(request):
         }, status=500)
 
 
+@require_http_methods(["POST"])
+def modificar_diferencia_segundo_conteo(request):
+    if 'usuario' not in request.session:
+        return JsonResponse(
+            {'success': False, 'message': 'No autenticado'},
+            status=401
+        )
+
+    if _perfil_nombre(request) != 'JEFE DE TIENDA':
+        return JsonResponse({
+            'success': False,
+            'message': 'Solo el perfil JEFE DE TIENDA puede modificar diferencias'
+        }, status=403)
+
+    try:
+        data = json.loads(request.body or '{}')
+        diferencia_id = data.get('diferencia_id')
+        nueva_diferencia = data.get('nueva_diferencia')
+
+        if not diferencia_id or nueva_diferencia in (None, ''):
+            return JsonResponse({
+                'success': False,
+                'message': 'Faltan diferencia_id y nueva_diferencia'
+            }, status=400)
+
+        try:
+            nueva_diferencia = Decimal(str(nueva_diferencia))
+        except (InvalidOperation, TypeError, ValueError):
+            return JsonResponse({
+                'success': False,
+                'message': 'La nueva diferencia debe ser numerica'
+            }, status=400)
+
+        usuario = request.session.get('usuario', {})
+        nombre_usuario = str(usuario.get('nombre', '') or '').strip()
+        cedula_usuario = str(usuario.get('cedula', '') or '').strip()
+
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT
+                        id,
+                        codigo_sap,
+                        ena,
+                        diferencia,
+                        numero_conteo,
+                        almacen_sistema
+                    FROM inv_inventario_fisico_vs_sistema
+                    WHERE id = %s
+                    FOR UPDATE
+                """, [diferencia_id])
+                row = cursor.fetchone()
+
+                if not row:
+                    return JsonResponse({
+                        'success': False,
+                        'message': 'No se encontro la diferencia'
+                    }, status=404)
+
+                (
+                    diferencia_id_db,
+                    codigo_sap,
+                    ean,
+                    diferencia_anterior,
+                    numero_conteo,
+                    almacen
+                ) = row
+
+                if not _puede_acceder_numero_conteo(
+                    request, numero_conteo, almacen, cursor
+                ):
+                    return _respuesta_sin_acceso()
+
+                cursor.execute("""
+                    UPDATE inv_inventario_fisico_vs_sistema
+                    SET diferencia = %s
+                    WHERE id = %s
+                """, [nueva_diferencia, diferencia_id_db])
+
+                cursor.execute("""
+                    INSERT INTO INV_DIFERENCIA_LOG_TBL (
+                        DIFERENCIA_ID,
+                        NUMERO_CONTEO,
+                        ALMACEN,
+                        NOMBRE_USUARIO,
+                        CEDULA_USUARIO,
+                        PROCESO,
+                        CODIGO_SAP,
+                        DIFERENCIA_ANTERIOR,
+                        DIFERENCIA_NUEVA,
+                        EAN,
+                        FECHA_MODIFICACION
+                    ) VALUES (
+                        %s, %s, %s, %s, %s,
+                        'MODIFICACION_SEGUNDO_CONTEO_JEFE',
+                        %s, %s, %s, %s, SYSTIMESTAMP
+                    )
+                """, [
+                    diferencia_id_db,
+                    numero_conteo,
+                    almacen,
+                    nombre_usuario,
+                    cedula_usuario,
+                    codigo_sap,
+                    diferencia_anterior,
+                    nueva_diferencia,
+                    ean
+                ])
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Diferencia actualizada y auditada correctamente',
+            'diferencia_id': diferencia_id_db,
+            'diferencia_anterior': diferencia_anterior,
+            'diferencia_nueva': str(nueva_diferencia),
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'message': 'Payload JSON invalido'
+        }, status=400)
+    except Exception as e:
+        print(f"Error modificando diferencia de segundo conteo: {e}")
+        mensaje = str(e)
+        if 'ORA-00942' in mensaje:
+            mensaje = (
+                'No existe INV_DIFERENCIA_LOG_TBL. Ejecute primero el script '
+                'sql/crear_log_modificacion_diferencia.sql'
+            )
+        return JsonResponse({
+            'success': False,
+            'message': mensaje
+        }, status=500)
+
+
+def auditoria_diferencias_segundo_conteo(request, numero_conteo):
+    if 'usuario' not in request.session:
+        return JsonResponse(
+            {'success': False, 'message': 'No autenticado'},
+            status=401
+        )
+
+    if request.method != 'GET':
+        return JsonResponse(
+            {'success': False, 'message': 'Metodo no permitido'},
+            status=405
+        )
+
+    if not _puede_acceder_numero_conteo(request, numero_conteo):
+        return _respuesta_sin_acceso()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    LOG_ID,
+                    DIFERENCIA_ID,
+                    NUMERO_CONTEO,
+                    ALMACEN,
+                    NOMBRE_USUARIO,
+                    CEDULA_USUARIO,
+                    PROCESO,
+                    CODIGO_SAP,
+                    DIFERENCIA_ANTERIOR,
+                    DIFERENCIA_NUEVA,
+                    EAN,
+                    TO_CHAR(
+                        FECHA_MODIFICACION,
+                        'YYYY-MM-DD HH24:MI:SS'
+                    )
+                FROM INV_DIFERENCIA_LOG_TBL
+                WHERE NUMERO_CONTEO = %s
+                ORDER BY FECHA_MODIFICACION DESC, LOG_ID DESC
+            """, [numero_conteo])
+            rows = cursor.fetchall()
+
+        auditoria = [
+            {
+                'log_id': row[0],
+                'diferencia_id': row[1],
+                'numero_conteo': row[2],
+                'almacen': row[3],
+                'nombre_usuario': row[4],
+                'cedula_usuario': row[5],
+                'proceso': row[6],
+                'codigo_sap': row[7],
+                'diferencia_anterior': row[8],
+                'diferencia_nueva': row[9],
+                'ean': row[10],
+                'fecha_modificacion': row[11],
+            }
+            for row in rows
+        ]
+
+        return JsonResponse({
+            'success': True,
+            'numero_conteo': numero_conteo,
+            'auditoria': auditoria,
+            'total': len(auditoria),
+        })
+
+    except Exception as e:
+        print(f"Error consultando auditoria de diferencias: {e}")
+        mensaje = str(e)
+        if 'ORA-00942' in mensaje:
+            mensaje = (
+                'No existe INV_DIFERENCIA_LOG_TBL. Ejecute primero el script '
+                'sql/crear_log_modificacion_diferencia.sql'
+            )
+        return JsonResponse({
+            'success': False,
+            'message': mensaje
+        }, status=500)
+
+
 def obtener_colaboradores_conteo_redistribucion(request):
     """
     Obtiene colaboradores asignados a un conteo (por numero_conteo) para
@@ -3886,6 +4550,9 @@ def obtener_colaboradores_conteo_redistribucion(request):
     numero_conteo = request.GET.get('numero_conteo', '').strip()
     if not numero_conteo:
         return JsonResponse({'success': False, 'message': 'Falta numero_conteo'}, status=400)
+
+    if not _puede_acceder_numero_conteo(request, numero_conteo):
+        return _respuesta_sin_acceso()
 
     try:
         with connection.cursor() as cursor:
@@ -3965,6 +4632,11 @@ def redistribuir_diferencias_segundo_conteo(request):
     if not colaboradores_validos:
         return JsonResponse({'success': False, 'message': 'Seleccione al menos un colaborador valido'}, status=400)
 
+    if not _puede_acceder_numero_conteo(
+        request, numero_conteo, almacen
+    ):
+        return _respuesta_sin_acceso()
+
     started_at = time.perf_counter()
 
     try:
@@ -4041,7 +4713,7 @@ def reporte_primer_conteo(request):
         return redirect('login')
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
-    usuario_responsable = request.session['usuario'].get('cedula', '')
+    filtro_acceso, params_acceso = _filtro_conteos_usuario(request, 'a')
 
     # Obtener opciones para los dropdowns
     opciones_centro = []
@@ -4050,34 +4722,64 @@ def reporte_primer_conteo(request):
 
     with connection.cursor() as cursor:
         # Obtener centros únicos
-        cursor.execute("""
+        query_centros = f"""
             SELECT DISTINCT a.centro
             FROM inv_piqueos_inventario_tbl a
-            WHERE a.usuario_responsable = %s
+            WHERE {filtro_acceso}
             AND a.centro IS NOT NULL
             ORDER BY a.centro
-        """, [usuario_responsable])
+        """
+        _imprimir_query_alcance(
+            'REPORTE_PRIMER_CONTEO_CENTROS',
+            query_centros,
+            params_acceso
+        )
+        cursor.execute(query_centros, params_acceso)
         opciones_centro = [row[0] for row in cursor.fetchall()]
+        print(
+            "[QUERY_ALCANCE:REPORTE_PRIMER_CONTEO_CENTROS] "
+            f"VALORES: {opciones_centro!r}"
+        )
 
         # Obtener almacenes únicos
-        cursor.execute("""
+        query_almacenes = f"""
             SELECT DISTINCT a.almacen
             FROM inv_piqueos_inventario_tbl a
-            WHERE a.usuario_responsable = %s
+            WHERE {filtro_acceso}
             AND a.almacen IS NOT NULL
             ORDER BY a.almacen
-        """, [usuario_responsable])
+        """
+        _imprimir_query_alcance(
+            'REPORTE_PRIMER_CONTEO_ALMACENES',
+            query_almacenes,
+            params_acceso
+        )
+        cursor.execute(query_almacenes, params_acceso)
         opciones_almacen = [row[0] for row in cursor.fetchall()]
+        print(
+            "[QUERY_ALCANCE:REPORTE_PRIMER_CONTEO_ALMACENES] "
+            f"VALORES: {opciones_almacen!r}"
+        )
 
         # Obtener números de conteo únicos
-        cursor.execute("""
+        query_conteos = f"""
             SELECT DISTINCT a.numero_conteo
             FROM inv_piqueos_inventario_tbl a
-            WHERE a.usuario_responsable = %s
+            WHERE {filtro_acceso}
             AND a.numero_conteo IS NOT NULL
             ORDER BY a.numero_conteo DESC
-        """, [usuario_responsable])
+        """
+        _imprimir_query_alcance(
+            'REPORTE_PRIMER_CONTEO_NUMEROS',
+            query_conteos,
+            params_acceso
+        )
+        cursor.execute(query_conteos, params_acceso)
         opciones_numero_conteo = [row[0] for row in cursor.fetchall()]
+        print(
+            "[QUERY_ALCANCE:REPORTE_PRIMER_CONTEO_NUMEROS] "
+            f"VALORES: {opciones_numero_conteo!r}"
+        )
 
     # OBTENER FILTROS
     filtros = {}
@@ -4096,7 +4798,7 @@ def reporte_primer_conteo(request):
     resultados = []
     if any(filtros.values()):
         # Consulta SQL
-        query = """
+        query = f"""
             SELECT 
                 a.numero_conteo,
                 a.centro,
@@ -4118,9 +4820,9 @@ def reporte_primer_conteo(request):
             JOIN inv_inventario_fisico_vs_sistema b
             ON a.numero_conteo = b.numero_conteo
             AND a.almacen = b.almacen_sistema
-            WHERE a.usuario_responsable = %s
+            WHERE {filtro_acceso}
         """
-        params = [usuario_responsable]
+        params = list(params_acceso)
 
         # Aplicar filtros
         if filtros.get('centro'):
@@ -4135,13 +4837,15 @@ def reporte_primer_conteo(request):
 
         query += " ORDER BY a.numero_conteo, b.codigo_barras"
 
-        print(f"🔍 [REPORTE] Query: {query}")
-        print(f"🔍 [REPORTE] Parámetros: {params}")
+        _imprimir_query_alcance('REPORTE_PRIMER_CONTEO', query, params)
 
         # Obtener datos
         with connection.cursor() as cursor:
             cursor.execute(query, params)
             rows = cursor.fetchall()
+            _imprimir_query_alcance(
+                'REPORTE_PRIMER_CONTEO', query, params, len(rows)
+            )
             for row in rows:
                 resultados.append({
                     'numero_conteo': row[0],
@@ -4211,6 +4915,9 @@ def obtener_detalle_secuencias(request, secuencial_id):
 
     if request.method != 'GET':
         return JsonResponse({'error': 'Método no permitido'}, status=405)
+
+    if not _puede_acceder_secuencial(request, secuencial_id):
+        return _respuesta_sin_acceso()
 
     try:
         print(f"🔍 Obteniendo detalle de secuencias para secuencial_id: {secuencial_id}")
@@ -4285,6 +4992,11 @@ def anular_secuencia_detalle(request):
                 'success': False,
                 'message': 'secuencial_deta_id requerido'
             })
+
+        if not _puede_acceder_secuencial(
+            request, secuencial_deta_id, detalle=True
+        ):
+            return _respuesta_sin_acceso()
 
         print(f"🚫 Anulando secuencia detalle ID: {secuencial_deta_id}")
 
@@ -4366,6 +5078,11 @@ def activar_secuencia_detalle(request):
                 'message': 'secuencial_deta_id requerido'
             })
 
+        if not _puede_acceder_secuencial(
+            request, secuencial_deta_id, detalle=True
+        ):
+            return _respuesta_sin_acceso()
+
         print(f"✅ Activando secuencia detalle ID: {secuencial_deta_id}")
 
         with connection.cursor() as cursor:
@@ -4425,9 +5142,7 @@ def activar_secuencia_detalle(request):
 @csrf_exempt
 def obtener_datos_tienda_piqueo_manual(request):
     """
-    Vista para obtener sbs_no y store_no antes de abrir el modal de piqueo manual
-    Query: SELECT sbs_no, store_no FROM jde_general 
-           WHERE sap_werks = (SELECT SUBSTR(kostl, -4) FROM sap_hcm.ms_colaboradores WHERE cedide_mf = cedula)
+    Obtiene sbs_no y store_no desde la tienda del conteo seleccionado.
     """
     if 'usuario' not in request.session:
         return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
@@ -4436,36 +5151,46 @@ def obtener_datos_tienda_piqueo_manual(request):
         return JsonResponse({'success': False, 'message': 'Método no permitido'}, status=405)
 
     try:
+        data = json.loads(request.body or '{}')
+        conteo_id = data.get('conteo_id')
         usuario = request.session.get('usuario', {})
         cedula = usuario.get('cedula', '')
 
-        if not cedula:
+        if not conteo_id:
             return JsonResponse({
                 'success': False,
-                'message': 'No se encontró la cédula del usuario'
-            })
+                'message': 'No se recibió el conteo seleccionado'
+            }, status=400)
 
-        print(f"🔍 Obteniendo datos de tienda para cédula: {cedula}")
+        if not _puede_acceder_piqueo(request, conteo_id):
+            return _respuesta_sin_acceso()
 
         with connection.cursor() as cursor:
-            # Ejecutar el query para obtener sbs_no y store_no
+            cursor.execute("""
+                SELECT almacen
+                FROM INV_PIQUEOS_INVENTARIO_TBL
+                WHERE piqueo_id = %s
+            """, [conteo_id])
+            conteo_row = cursor.fetchone()
+            if not conteo_row:
+                return JsonResponse({
+                    'success': False,
+                    'message': 'No se encontró el conteo seleccionado'
+                }, status=404)
+
+            almacen = conteo_row[0]
             cursor.execute("""
                 SELECT sbs_no, store_no  
                 FROM jde_general@DBL_CLOUDFRIDTMAN.REDBDD.REDPROD.ORACLEVCN.COM 
-                WHERE sap_werks = (
-                    SELECT SUBSTR(kostl, -4)  
-                    FROM sap_hcm.ms_colaboradores 
-                    WHERE cedide_mf = :cedula
-                )
-            """, {'cedula': cedula})
+                WHERE sap_werks = %s
+            """, [almacen])
 
             row = cursor.fetchone()
 
             if not row:
-                print(f"⚠️ No se encontraron datos de tienda para la cédula: {cedula}")
                 return JsonResponse({
                     'success': False,
-                    'message': 'No se encontraron datos de tienda para el usuario'
+                    'message': 'No se encontraron datos JDE para la tienda del conteo'
                 })
 
             sbs_no, store_no = row
@@ -4476,7 +5201,8 @@ def obtener_datos_tienda_piqueo_manual(request):
                 'success': True,
                 'sbs_no': sbs_no,
                 'store_no': store_no,
-                'cedula': cedula
+                'cedula': cedula,
+                'almacen': almacen
             })
 
     except Exception as e:
@@ -4620,6 +5346,11 @@ def guardar_piqueo_manual(request):
                 'success': False,
                 'message': 'No hay items para guardar'
             })
+
+        if not _puede_acceder_piqueo(request, conteo_id):
+            return _respuesta_sin_acceso()
+
+        cedula = request.session.get('usuario', {}).get('cedula', '')
 
         print(f"💾 Guardando piqueo manual...")
         print(f"   - Conteo ID: {conteo_id}")
@@ -4827,6 +5558,9 @@ def imprimir_acta_preliminar_pdf(request, piqueo_id):
     """
     if 'usuario' not in request.session:
         return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        return _respuesta_sin_acceso()
 
     try:
         print(f"🖨️ [IMPRIMIR_ACTA] Generando PDF para piqueo_id: {piqueo_id}")
@@ -5488,9 +6222,6 @@ def acta_preliminar(request):
         return redirect('login')
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
-    usuario_sesion = request.session.get('usuario', {})
-    usuario_cedula = usuario_sesion.get('cedula', '')
-
     # OBTENER FILTROS (GET o POST/AJAX)
     filtros = {}
     if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -5506,15 +6237,15 @@ def acta_preliminar(request):
 
     with connection.cursor() as cursor:
         # Query para obtener conteos con estado SEGUNDO_CONTEO o ACTA_PRELIMINAR
-        query = """
+        filtro_acceso, params = _filtro_conteos_usuario(request)
+        query = f"""
             SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
             nombre_empleado_func(usuario_responsable) as nm_responsable, 
             usuario_creacion, centro, almacen
             FROM INV_PIQUEOS_INVENTARIO_TBL
-            WHERE usuario_responsable = %s
+            WHERE {filtro_acceso}
             AND UPPER(estado) IN ('SEGUNDO_CONTEO', 'ACTA_PRELIMINAR')
         """
-        params = [usuario_cedula]
 
         # APLICAR FILTROS ADICIONALES SI SE PROPORCIONAN
         if filtros.get('centro'):
@@ -5527,10 +6258,12 @@ def acta_preliminar(request):
 
         query += " ORDER BY fecha_inicio DESC"
 
-        print(f"🔍 [ACTA_PRELIMINAR] Query ejecutado: {query}")
-        print(f"🔍 [ACTA_PRELIMINAR] Parámetros: {params}")
+        _imprimir_query_alcance('ACTA_PRELIMINAR', query, params)
         cursor.execute(query, params)
         rows = cursor.fetchall()
+        _imprimir_query_alcance(
+            'ACTA_PRELIMINAR', query, params, len(rows)
+        )
 
     conteos = [
         {
@@ -5884,6 +6617,278 @@ def actualizar_estado_tercer_conteo(request):
         }, status=500)
 
 
+def verifica_segundo_conteo(request):
+    """
+    Vista para el Jefe de Tienda. Muestra conteos en estado SEGUNDO_CONTEO
+    filtrados automáticamente por el almacén asignado al usuario en sesión.
+    """
+    if 'usuario' not in request.session:
+        return redirect('login')
+
+    perfil_nombre = _perfil_nombre(request)
+
+    if perfil_nombre != "JEFE DE TIENDA":
+        messages.error(request, 'No tiene permisos para acceder a Verifica Segundo Conteo')
+        return redirect('dashboard')
+
+    filtro_acceso, params = _filtro_conteos_usuario(request)
+
+    with connection.cursor() as cursor:
+        query = f"""
+            SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
+            nombre_empleado_func(usuario_responsable) as nm_responsable,
+            usuario_creacion, centro, almacen
+            FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE UPPER(estado) = 'SEGUNDO_CONTEO'
+            AND {filtro_acceso}
+            ORDER BY fecha_inicio DESC
+        """
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+    conteos = [
+        {
+            'piqueo_id': row[0],
+            'numero_conteo': row[1],
+            'estado': row[2],
+            'fecha_inicio': row[3].strftime('%b. %d, %Y') if row[3] else '-',
+            'fecha_fin': row[4].strftime('%b. %d, %Y') if row[4] else '-',
+            'nm_responsable': row[5],
+            'usuario_creacion': row[6],
+            'centro': row[7],
+            'almacen': row[8],
+        }
+        for row in rows
+    ]
+
+    context = {
+        'usuario': request.session['usuario'],
+        'perfil': perfil_nombre,
+        'conteos': conteos,
+        'estadisticas': {'total': len(conteos)},
+    }
+    return render(request, 'inventario/verifica_segundo_conteo.html', context)
+
+
+def detalle_verifica_segundo_conteo(request, numero_conteo):
+    """
+    Devuelve el detalle de diferencias del segundo conteo para el Jefe de Tienda.
+    Valida que el conteo pertenezca a un almacén accesible por el jefe.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    if _perfil_nombre(request) != "JEFE DE TIENDA":
+        return JsonResponse({'success': False, 'message': 'No tiene permisos'}, status=403)
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT almacen FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE numero_conteo = %s
+        """, [numero_conteo])
+        row_check = cursor.fetchone()
+        if not row_check or not _puede_acceder_almacen(request, row_check[0]):
+            return JsonResponse({'success': False, 'message': 'Sin acceso a este conteo'}, status=403)
+
+        cursor.execute("""
+            SELECT numero_conteo, codigo_barras AS codigo, codigo_sap, descripcion,
+                   marca, talla, ena AS ean, grupo_articulos, groes, ubicacion_4,
+                   conteo_4, sap_4, diferencia_4,
+                   proceso_segundo_conteo, observaciones_segundo_conteo, nombre_colaborador
+            FROM inv_inventario_fisico_vs_sistema
+            WHERE numero_conteo = %s
+            AND estado_comparacion_4 != 'CUADRADO'
+            AND estado_comparacion = 'DIFERENCIA'
+            ORDER BY estado_comparacion_4
+        """, [numero_conteo])
+        rows = cursor.fetchall()
+
+    detalle = [
+        {
+            'numero_conteo': row[0],
+            'codigo': row[1],
+            'codigo_sap': row[2],
+            'descripcion': row[3],
+            'marca': row[4],
+            'talla': row[5],
+            'ean': row[6],
+            'grupo_articulos': row[7],
+            'groes': row[8],
+            'ubicacion_4': row[9],
+            'conteo_4': row[10],
+            'sap_4': row[11],
+            'diferencia_4': row[12],
+            'proceso_segundo_conteo': row[13],
+            'observaciones': row[14],
+            'nombre_colaborador': row[15],
+        }
+        for row in rows
+    ]
+
+    return JsonResponse({
+        'success': True,
+        'numero_conteo': numero_conteo,
+        'detalle': detalle,
+        'total': len(detalle),
+    })
+
+
+@require_http_methods(["POST"])
+def guardar_detalle_verifica_segundo_conteo(request):
+    """
+    Guarda la edición inline (conteo_4 y observacion_4) para el Jefe de Tienda.
+    Valida acceso al almacén antes de ejecutar el stored procedure.
+    """
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    if _perfil_nombre(request) != "JEFE DE TIENDA":
+        return JsonResponse({'success': False, 'message': 'No tiene permisos'}, status=403)
+
+    try:
+        data = json.loads(request.body)
+        numero_conteo = data.get('numero_conteo')
+        codigo_sap = data.get('codigo_sap')
+        ean = data.get('ean')
+        conteo_4 = data.get('conteo_4')
+
+        if not numero_conteo or not codigo_sap or not ean:
+            return JsonResponse({
+                'success': False,
+                'message': 'Faltan datos requeridos: numero_conteo, codigo_sap y ean'
+            }, status=400)
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT almacen FROM INV_PIQUEOS_INVENTARIO_TBL
+                WHERE numero_conteo = %s
+            """, [numero_conteo])
+            conteo_row = cursor.fetchone()
+
+            if not conteo_row:
+                return JsonResponse({
+                    'success': False,
+                    'message': f'No se encontro el almacen del conteo {numero_conteo}'
+                }, status=404)
+
+            almacen = conteo_row[0]
+
+            if not _puede_acceder_almacen(request, almacen):
+                return JsonResponse({
+                    'success': False,
+                    'message': 'No tiene acceso a este almacen'
+                }, status=403)
+
+            cursor.execute("""
+                SELECT id, conteo_4
+                FROM inv_inventario_fisico_vs_sistema
+                WHERE numero_conteo = %s AND codigo_sap = %s AND ena = %s
+            """, [numero_conteo, codigo_sap, ean])
+            prev_row = cursor.fetchone()
+            diferencia_id   = prev_row[0] if prev_row else 0
+            conteo_anterior = prev_row[1] if prev_row else None
+
+            cursor.callproc('genera_conteo_4', [
+                numero_conteo,
+                almacen,
+                codigo_sap,
+                conteo_4
+            ])
+
+            usuario_ses    = request.session.get('usuario', {})
+            nombre_usuario = str(usuario_ses.get('nombre', '') or '').strip()
+            cedula_usuario = str(usuario_ses.get('cedula', '') or '').strip()
+
+            cursor.execute("""
+                INSERT INTO INV_DIFERENCIA_LOG_TBL (
+                    DIFERENCIA_ID, NUMERO_CONTEO, ALMACEN,
+                    NOMBRE_USUARIO, CEDULA_USUARIO, PROCESO,
+                    CODIGO_SAP, CONTEO_ANTERIOR, CONTEO_NUEVA,
+                    EAN, FECHA_MODIFICACION
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    'VERIFICACION_JEFE_SEGUNDO_CONTEO',
+                    %s, %s, %s, %s, SYSTIMESTAMP
+                )
+            """, [diferencia_id, numero_conteo, almacen,
+                  nombre_usuario, cedula_usuario,
+                  codigo_sap, conteo_anterior, conteo_4, ean])
+
+            connection.commit()
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Detalle actualizado correctamente',
+            'conteo_4': conteo_4,
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({'success': False, 'message': 'Error al procesar los datos JSON'}, status=400)
+    except Exception as e:
+        print(f"❌ [GUARDAR_DETALLE_VERIFICA_SEGUNDO_CONTEO] Error: {str(e)}")
+        connection.rollback()
+        return JsonResponse({'success': False, 'message': f'Error al guardar el detalle: {str(e)}'}, status=500)
+
+
+def auditoria_verifica_segundo_conteo(request, numero_conteo):
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    if _perfil_nombre(request) != "JEFE DE TIENDA":
+        return JsonResponse({'success': False, 'message': 'No tiene permisos'}, status=403)
+
+    if request.method != 'GET':
+        return JsonResponse({'success': False, 'message': 'Metodo no permitido'}, status=405)
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT almacen FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE numero_conteo = %s
+        """, [numero_conteo])
+        row_check = cursor.fetchone()
+        if not row_check or not _puede_acceder_almacen(request, row_check[0]):
+            return JsonResponse({'success': False, 'message': 'Sin acceso a este conteo'}, status=403)
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT LOG_ID, DIFERENCIA_ID, NUMERO_CONTEO, ALMACEN,
+                       NOMBRE_USUARIO, CEDULA_USUARIO, PROCESO, CODIGO_SAP,
+                       CONTEO_ANTERIOR, CONTEO_NUEVA, EAN,
+                       TO_CHAR(FECHA_MODIFICACION, 'YYYY-MM-DD HH24:MI:SS')
+                FROM INV_DIFERENCIA_LOG_TBL
+                WHERE NUMERO_CONTEO = %s
+                ORDER BY FECHA_MODIFICACION DESC, LOG_ID DESC
+            """, [numero_conteo])
+            rows = cursor.fetchall()
+
+        auditoria = [
+            {
+                'log_id': row[0], 'diferencia_id': row[1],
+                'numero_conteo': row[2], 'almacen': row[3],
+                'nombre_usuario': row[4], 'cedula_usuario': row[5],
+                'proceso': row[6], 'codigo_sap': row[7],
+                'conteo_anterior': row[8], 'conteo_nueva': row[9],
+                'ean': row[10], 'fecha_modificacion': row[11],
+            }
+            for row in rows
+        ]
+
+        return JsonResponse({
+            'success': True,
+            'numero_conteo': numero_conteo,
+            'auditoria': auditoria,
+            'total': len(auditoria),
+        })
+
+    except Exception as e:
+        print(f"❌ [AUDITORIA_VERIFICA_SEGUNDO_CONTEO] Error: {str(e)}")
+        mensaje = str(e)
+        if 'ORA-00942' in mensaje:
+            mensaje = 'No existe la tabla INV_DIFERENCIA_LOG_TBL. Ejecute el script de creacion.'
+        return JsonResponse({'success': False, 'message': mensaje}, status=500)
+
+
 def acta_final(request):
     """
     Vista administrativa para consultar conteos en estado TERCER_CONTEO.
@@ -6085,6 +7090,9 @@ def formulario_acta_preliminar(request, piqueo_id):
 
     perfil = request.session.get('perfil_seleccionado', {}).get('nombre', '')
     usuario_sesion = request.session.get('usuario', {})
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        messages.error(request, 'No tiene acceso a este conteo')
+        return redirect('acta_preliminar')
 
     print(f"📋 [FORMULARIO_ACTA] Cargando formulario para PIQUEO_ID: {piqueo_id}")
 
@@ -6811,6 +7819,9 @@ def guardar_acta_preliminar(request):
                     'success': False,
                     'message': f'El campo {campo} es obligatorio'
                 })
+
+        if not _puede_acceder_piqueo(request, data.get('piqueo_id')):
+            return _respuesta_sin_acceso()
         
         with connection.cursor() as cursor:
             # Preparar valores, convirtiendo strings vacíos a NULL
@@ -6833,6 +7844,18 @@ def guardar_acta_preliminar(request):
             numero_conteo_val = get_value('numero_conteo')
             centro_val = get_value('centro')
             almacen_val = get_value('almacen')
+            cursor.execute("""
+                SELECT numero_conteo, centro, almacen
+                FROM INV_PIQUEOS_INVENTARIO_TBL
+                WHERE piqueo_id = %s
+            """, [piqueo_id_val])
+            piqueo_row = cursor.fetchone()
+            if not piqueo_row:
+                return JsonResponse({
+                    'success': False,
+                    'message': 'No se encontró el conteo'
+                }, status=404)
+            numero_conteo_val, centro_val, almacen_val = piqueo_row
             empresa_val = get_value('empresa', 'SUPERDEPORTE')
             concepto_val = get_value('concepto', '')
             # Obtener valor de sucursal si viene en payload (se puede sobrescribir más abajo consultando JDE)
@@ -7206,6 +8229,9 @@ def eliminar_acta_preliminar(request, piqueo_id):
     """
     if 'usuario' not in request.session:
         return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    if not _puede_acceder_piqueo(request, piqueo_id):
+        return _respuesta_sin_acceso()
 
     try:
         print(f"🗑️ [ELIMINAR_ACTA] Iniciando eliminación para piqueo_id: {piqueo_id}")
