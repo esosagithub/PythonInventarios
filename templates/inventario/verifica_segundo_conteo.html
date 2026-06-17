@@ -158,7 +158,19 @@
             <div class="detail-filters">
                 <div class="detail-filter-group">
                     <label for="detalleFiltroEan">Filtrar por EAN</label>
-                    <input type="text" id="detalleFiltroEan" class="form-control" placeholder="Buscar EAN" oninput="filtrarDetallePorEan()">
+                    <input type="text" id="detalleFiltroEan" class="form-control" placeholder="Buscar EAN" oninput="aplicarFiltrosDetalle()">
+                </div>
+                <div class="detail-filter-group detail-filter-wide">
+                    <label for="detalleFiltroColaborador">Colaborador</label>
+                    <select id="detalleFiltroColaborador" class="form-control" onchange="aplicarFiltrosDetalle()">
+                        <option value="">Todos los colaboradores</option>
+                    </select>
+                </div>
+                <div class="detail-filter-group detail-filter-wide">
+                    <label for="detalleFiltroUbicacion">Ubicación</label>
+                    <select id="detalleFiltroUbicacion" class="form-control" onchange="aplicarFiltrosDetalle()">
+                        <option value="">Todas las ubicaciones</option>
+                    </select>
                 </div>
                 <div style="align-self:flex-end;">
                     <button class="btn btn-auditoria" type="button" onclick="abrirAuditoria()">
@@ -333,18 +345,62 @@
         detalleEditingIndex = null;
         detallePageSize = Number(document.getElementById('detallePageSize').value) || 10;
         document.getElementById('detalleFiltroEan').value = '';
-        renderizarDetallePagina();
+        cargarOpcionesFiltrosDetalle();
+        aplicarFiltrosDetalle();
         card.style.display = 'block';
         card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function normalizarFiltroDetalle(value) {
+        return String(value ?? '').trim();
+    }
+
+    function crearOpcionesSelectDetalle(selectId, valores, textoTodos) {
+        const select = document.getElementById(selectId);
+        const opciones = [...new Set(
+            valores
+                .map(normalizarFiltroDetalle)
+                .filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
+        select.innerHTML = `<option value="">${textoTodos}</option>` + opciones.map(valor => (
+            `<option value="${escapeHtml(valor)}">${escapeHtml(valor)}</option>`
+        )).join('');
+    }
+
+    function cargarOpcionesFiltrosDetalle() {
+        crearOpcionesSelectDetalle(
+            'detalleFiltroColaborador',
+            detalleData.map(item => item.nombre_colaborador),
+            'Todos los colaboradores'
+        );
+        crearOpcionesSelectDetalle(
+            'detalleFiltroUbicacion',
+            detalleData.map(item => item.ubicacion_4),
+            'Todas las ubicaciones'
+        );
     }
 
     function renderizarDetallePagina() {
         const tbody = document.getElementById('detalleBody');
         const pagination = document.getElementById('detallePagination');
         const total = detalleFilteredData.length;
+        const totalGeneral = detalleData.length;
+        const hayFiltros = Boolean(
+            document.getElementById('detalleFiltroEan').value.trim() ||
+            document.getElementById('detalleFiltroColaborador').value ||
+            document.getElementById('detalleFiltroUbicacion').value
+        );
+
+        document.getElementById('detalleTotal').textContent = hayFiltros
+            ? `${total} de ${totalGeneral} registro${totalGeneral === 1 ? '' : 's'}`
+            : `${totalGeneral} registro${totalGeneral === 1 ? '' : 's'}`;
 
         if (!total) {
-            tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;padding:20px;">No hay diferencias para este conteo.</td></tr>';
+            const mensaje = hayFiltros
+                ? 'No hay registros que coincidan con los filtros aplicados.'
+                : 'No hay diferencias para este conteo.';
+            tbody.innerHTML = `<tr><td colspan="15" style="text-align:center;padding:20px;">${mensaje}</td></tr>`;
             pagination.style.display = 'none';
             document.getElementById('detallePaginationSummary').textContent = '0-0 of 0 records';
             return;
@@ -460,9 +516,18 @@
         renderizarDetallePagina();
     }
 
-    function filtrarDetallePorEan() {
+    function aplicarFiltrosDetalle() {
         const filtroEan = document.getElementById('detalleFiltroEan').value.trim().toLowerCase();
-        detalleFilteredData = detalleData.filter(item => String(item.ean ?? '').toLowerCase().includes(filtroEan));
+        const filtroColaborador = normalizarFiltroDetalle(document.getElementById('detalleFiltroColaborador').value);
+        const filtroUbicacion = normalizarFiltroDetalle(document.getElementById('detalleFiltroUbicacion').value);
+
+        detalleFilteredData = detalleData.filter(item => {
+            const coincideEan = String(item.ean ?? '').toLowerCase().includes(filtroEan);
+            const coincideColaborador = !filtroColaborador || normalizarFiltroDetalle(item.nombre_colaborador) === filtroColaborador;
+            const coincideUbicacion = !filtroUbicacion || normalizarFiltroDetalle(item.ubicacion_4) === filtroUbicacion;
+
+            return coincideEan && coincideColaborador && coincideUbicacion;
+        });
         detalleCurrentPage = 1;
         detalleEditingIndex = null;
         renderizarDetallePagina();
@@ -560,16 +625,20 @@
         const loading = document.getElementById('auditoriaLoading');
         const empty   = document.getElementById('auditoriaEmpty');
         const tabla   = document.getElementById('auditoriaTablaContainer');
+        const filtroEanDetalle = document.getElementById('detalleFiltroEan').value.trim();
 
         document.getElementById('auditoriaModalTitulo').textContent = `Auditoría del Conteo ${currentNumeroConteo}`;
-        document.getElementById('auditoriaFiltroEan').value = '';
+        document.getElementById('auditoriaFiltroEan').value = filtroEanDetalle;
         modal.style.display = 'block';
         loading.style.display = 'block';
         empty.style.display = 'none';
         tabla.style.display = 'none';
         document.getElementById('auditoriaTableBody').innerHTML = '';
 
-        fetch(`/auditoria-verifica-segundo-conteo/${encodeURIComponent(currentNumeroConteo)}/`)
+        const auditoriaUrl = `/auditoria-verifica-segundo-conteo/${encodeURIComponent(currentNumeroConteo)}/` +
+            (filtroEanDetalle ? `?ean=${encodeURIComponent(filtroEanDetalle)}` : '');
+
+        fetch(auditoriaUrl)
             .then(r => r.json())
             .then(data => {
                 loading.style.display = 'none';
@@ -578,7 +647,7 @@
                     return;
                 }
                 auditoriaData = data.auditoria || [];
-                renderizarAuditoria(auditoriaData);
+                filtrarAuditoriaPorEan();
             })
             .catch(err => {
                 loading.style.display = 'none';
@@ -688,6 +757,7 @@
     .detail-filters {
         display: flex;
         align-items: flex-end;
+        flex-wrap: wrap;
         gap: 16px;
         margin-bottom: 12px;
     }
@@ -709,6 +779,20 @@
         width: 100%;
         height: 34px;
         box-sizing: border-box;
+    }
+
+    #detalleFiltroColaborador,
+    #detalleFiltroUbicacion {
+        width: 100%;
+        min-width: 360px;
+        height: 38px;
+        line-height: 1.3;
+        padding: 8px 34px 8px 12px;
+        box-sizing: border-box;
+    }
+
+    .detail-filter-wide {
+        width: min(100%, 380px);
     }
 
     .detail-table {

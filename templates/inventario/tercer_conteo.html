@@ -95,14 +95,6 @@
             </div>
         </div>
 
-        <!-- Estadísticas -->
-        <div class="stats-grid" style="margin-bottom: 15px;">
-            <div class="stat-card">
-                <h3 id="statTotal">{{ estadisticas.total }}</h3>
-                <small>Total en Acta Preliminar</small>
-            </div>
-        </div>
-
         <!-- Tabla de Conteos -->
         <div id="conteosContainer" class="card">
             <h2>Conteo</h2>
@@ -150,7 +142,7 @@
                         {% empty %}
                         <tr>
                             <td colspan="9" style="text-align: center; padding: 20px;">
-                                No hay conteos en estado Acta Preliminar.
+                                Use el filtro para consultar conteos en estado Acta Preliminar.
                             </td>
                         </tr>
                         {% endfor %}
@@ -170,13 +162,19 @@
                     <label for="detalleFiltroEan">Filtrar por EAN</label>
                     <input type="text" id="detalleFiltroEan" class="form-control" placeholder="Buscar EAN" oninput="filtrarDetallePorEan()">
                 </div>
+                <div style="align-self:flex-end;">
+                    <button class="btn btn-auditoria" type="button" onclick="abrirAuditoria()">
+                        <i class="fas fa-history"></i> Auditoría
+                    </button>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="data-table detail-table">
                     <thead>
                         <tr>
                             <th>Acciones</th>
-                            <th>Conteo</th>
+                            <th>Último Conteo</th>
+                            <th>1er Conteo</th>
                             <th>2doConteo</th>
                             <th>SAP</th>
                             <th>RPRO</th>
@@ -221,6 +219,47 @@
             </div>
         </div>
     </div>
+
+    <!-- Modal Auditoría -->
+    <div id="modalAuditoria" class="modal" style="display:none;">
+        <div class="modal-content modal-auditoria">
+            <div class="modal-header">
+                <h3 id="auditoriaModalTitulo">Auditoría del Conteo</h3>
+                <span class="close" onclick="cerrarAuditoria()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="auditoria-filter-row">
+                    <div class="detail-filter-group" style="width:220px;">
+                        <label style="font-size:12px; font-weight:600; color:#333;">Filtrar por EAN</label>
+                        <input type="text" id="auditoriaFiltroEan" class="form-control" placeholder="Buscar EAN..." oninput="filtrarAuditoriaPorEan()">
+                    </div>
+                </div>
+                <div id="auditoriaLoading" style="display:none; padding:20px; text-align:center;">Cargando auditoría...</div>
+                <div id="auditoriaEmpty" style="display:none; padding:20px; text-align:center;">No existen modificaciones registradas para este conteo.</div>
+                <div id="auditoriaTablaContainer" class="table-responsive" style="display:none;">
+                    <table class="data-table auditoria-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Nombre</th>
+                                <th>Cédula</th>
+                                <th>Proceso</th>
+                                <th>Código SAP</th>
+                                <th>EAN</th>
+                                <th>Conteo Anterior</th>
+                                <th>Conteo Nuevo</th>
+                                <th>Almacén</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditoriaTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-modal-cerrar" type="button" onclick="cerrarAuditoria()">Cerrar</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script src="{% static 'js/dashboard.js' %}"></script>
@@ -233,6 +272,8 @@
     let detallePageSize = 10;
     let detalleTotalPages = 1;
     let detalleEditingIndex = null;
+    let currentNumeroConteo = null;
+    let auditoriaData = [];
 
     function showLoading(message = 'Cargando...') {
         const overlay = document.getElementById('loadingOverlay');
@@ -267,12 +308,17 @@
         document.getElementById('filtroAlmacen').value = '';
         currentFilters = {};
         document.getElementById('detalleTercerConteoCard').style.display = 'none';
-        cargarConteos();
+        currentNumeroConteo = null;
+        detalleData = [];
+        detalleFilteredData = [];
+        detalleEditingIndex = null;
+        actualizarTabla([], 'Use el filtro para consultar conteos en estado Acta Preliminar.');
     }
 
     function cargarConteos() {
         showLoading('Aplicando filtros...');
         document.getElementById('detalleTercerConteoCard').style.display = 'none';
+        currentNumeroConteo = null;
 
         fetch('{% url "tercer_conteo" %}', {
             method: 'POST',
@@ -287,7 +333,6 @@
         .then(data => {
             hideLoading();
             actualizarTabla(data.conteos);
-            document.getElementById('statTotal').textContent = data.estadisticas.total;
         })
         .catch(error => {
             hideLoading();
@@ -295,10 +340,10 @@
         });
     }
 
-    function actualizarTabla(conteos) {
+    function actualizarTabla(conteos, emptyMessage = 'No hay conteos en estado Acta Preliminar.') {
         const tbody = document.getElementById('conteoTableBody');
         if (conteos.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;">No hay conteos en estado Acta Preliminar.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;">${escapeHtml(emptyMessage)}</td></tr>`;
             return;
         }
         tbody.innerHTML = conteos.map(c => `
@@ -356,6 +401,7 @@
             detalleData = [];
             detalleFilteredData = [];
             detalleEditingIndex = null;
+            currentNumeroConteo = null;
             cargarConteos();
         })
         .catch(error => {
@@ -366,6 +412,7 @@
     }
 
     function verDetalle(numeroConteo) {
+        currentNumeroConteo = numeroConteo;
         mostrarSoloConteoSeleccionado(numeroConteo);
         showLoading('Cargando detalle del tercer conteo...');
 
@@ -423,7 +470,7 @@
         const total = detalleFilteredData.length;
 
         if (!total) {
-            tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:20px;">No hay diferencias para este conteo.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="17" style="text-align:center;padding:20px;">No hay diferencias para este conteo.</td></tr>';
             pagination.style.display = 'none';
             document.getElementById('detallePaginationSummary').textContent = '0-0 of 0 records';
             return;
@@ -464,6 +511,7 @@
                     </div>
                 </td>
                 <td><input type="number" id="editConteo4" class="inline-edit-input" value="${escapeHtml(item.conteo_4)}"></td>
+                <td>${escapeHtml(item.conteo_fisico)}</td>
                 <td>${escapeHtml(item.conteo_3)}</td>
                 <td>${escapeHtml(item.sap_4)}</td>
                 <td>${escapeHtml(item.r_pro_4)}</td>
@@ -490,6 +538,7 @@
                 </div>
             </td>
             <td>${escapeHtml(item.conteo_4)}</td>
+            <td>${escapeHtml(item.conteo_fisico)}</td>
             <td>${escapeHtml(item.conteo_3)}</td>
             <td>${escapeHtml(item.sap_4)}</td>
             <td>${escapeHtml(item.r_pro_4)}</td>
@@ -611,6 +660,84 @@
             console.error('Error al guardar detalle:', error);
             alert('Error al guardar el detalle.');
         });
+    }
+
+    function renderizarAuditoria(registros) {
+        const tbody = document.getElementById('auditoriaTableBody');
+        const tabla = document.getElementById('auditoriaTablaContainer');
+        const empty = document.getElementById('auditoriaEmpty');
+        if (!registros.length) {
+            tbody.innerHTML = '';
+            tabla.style.display = 'none';
+            empty.style.display = 'block';
+            return;
+        }
+        tbody.innerHTML = registros.map(item => `
+            <tr>
+                <td>${escapeHtml(item.fecha_modificacion || '')}</td>
+                <td>${escapeHtml(item.nombre_usuario || '')}</td>
+                <td>${escapeHtml(item.cedula_usuario || '')}</td>
+                <td>${escapeHtml(item.proceso || '')}</td>
+                <td>${escapeHtml(item.codigo_sap || '')}</td>
+                <td>${escapeHtml(item.ean || '')}</td>
+                <td class="numero-cell">${escapeHtml(item.conteo_anterior ?? '')}</td>
+                <td class="numero-cell">${escapeHtml(item.conteo_nueva ?? '')}</td>
+                <td>${escapeHtml(item.almacen || '')}</td>
+            </tr>
+        `).join('');
+        empty.style.display = 'none';
+        tabla.style.display = 'block';
+    }
+
+    function filtrarAuditoriaPorEan() {
+        const filtro = document.getElementById('auditoriaFiltroEan').value.trim().toLowerCase();
+        const filtrados = filtro
+            ? auditoriaData.filter(item => String(item.ean || '').toLowerCase().includes(filtro))
+            : auditoriaData;
+        renderizarAuditoria(filtrados);
+    }
+
+    function abrirAuditoria() {
+        if (!currentNumeroConteo) {
+            alert('Primero seleccione un conteo para ver su auditoría.');
+            return;
+        }
+        const modal = document.getElementById('modalAuditoria');
+        const loading = document.getElementById('auditoriaLoading');
+        const empty = document.getElementById('auditoriaEmpty');
+        const tabla = document.getElementById('auditoriaTablaContainer');
+        const filtroEanDetalle = document.getElementById('detalleFiltroEan').value.trim();
+
+        document.getElementById('auditoriaModalTitulo').textContent = `Auditoría del Conteo ${currentNumeroConteo}`;
+        document.getElementById('auditoriaFiltroEan').value = filtroEanDetalle;
+        modal.style.display = 'block';
+        loading.style.display = 'block';
+        empty.style.display = 'none';
+        tabla.style.display = 'none';
+        document.getElementById('auditoriaTableBody').innerHTML = '';
+
+        const auditoriaUrl = `/auditoria-tercer-conteo/${encodeURIComponent(currentNumeroConteo)}/` +
+            (filtroEanDetalle ? `?ean=${encodeURIComponent(filtroEanDetalle)}` : '');
+
+        fetch(auditoriaUrl)
+            .then(r => r.json())
+            .then(data => {
+                loading.style.display = 'none';
+                if (!data.success) {
+                    alert(data.message || 'Error al cargar la auditoría');
+                    return;
+                }
+                auditoriaData = data.auditoria || [];
+                filtrarAuditoriaPorEan();
+            })
+            .catch(err => {
+                loading.style.display = 'none';
+                alert('Error al consultar la auditoría: ' + err.message);
+            });
+    }
+
+    function cerrarAuditoria() {
+        document.getElementById('modalAuditoria').style.display = 'none';
     }
 
     document.addEventListener('DOMContentLoaded', function () {
@@ -741,7 +868,10 @@
 
     .detail-filters {
         display: flex;
+        align-items: flex-end;
+        flex-wrap: wrap;
         justify-content: flex-start;
+        gap: 16px;
         margin-bottom: 12px;
     }
 
@@ -1085,6 +1215,100 @@
             font-size: 9px;
             height: 26px;
         }
+    }
+
+    /* Modal Auditoría */
+    .modal {
+        position: fixed;
+        z-index: 9000;
+        left: 0; top: 0;
+        width: 100%; height: 100%;
+        background: rgba(0,0,0,0.55);
+        overflow: auto;
+    }
+
+    .modal-content {
+        background: #fff;
+        margin: 5% auto;
+        border-radius: 10px;
+        width: min(1200px, 95vw);
+        box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+
+    .modal-auditoria {
+        max-width: 1200px;
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        border-bottom: 1px solid #e4e4e4;
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        font-size: 16px;
+        color: #333;
+    }
+
+    .modal-body {
+        padding: 16px 20px;
+    }
+
+    .modal-footer {
+        padding: 12px 20px;
+        border-top: 1px solid #e4e4e4;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .modal .close {
+        font-size: 24px;
+        cursor: pointer;
+        color: #666;
+        line-height: 1;
+    }
+
+    .modal .close:hover {
+        color: #333;
+    }
+
+    .auditoria-table {
+        min-width: 1100px;
+    }
+
+    .numero-cell {
+        text-align: right;
+    }
+
+    .btn-auditoria {
+        background: #052F62;
+        color: #fff;
+        width: auto;
+        display: inline-flex;
+    }
+
+    .btn-auditoria:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .btn-modal-cerrar {
+        background: #052F62;
+        color: #fff;
+        width: auto;
+        display: inline-flex;
+    }
+
+    .btn-modal-cerrar:hover {
+        background: #031B38;
+        transform: translateY(-1px);
+    }
+
+    .auditoria-filter-row {
+        margin-bottom: 12px;
     }
 </style>
 {% endblock %}

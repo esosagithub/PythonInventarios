@@ -6322,8 +6322,9 @@ def tercer_conteo(request):
         messages.error(request, 'No tiene permisos para acceder a Tercer Conteo')
         return redirect('dashboard')
 
-    # Filtros (GET o AJAX POST)
+    # Filtros (solo AJAX POST carga registros; GET solo renderiza la pantalla).
     filtros = {}
+    rows = []
     if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         try:
             data = json.loads(request.body)
@@ -6334,25 +6335,26 @@ def tercer_conteo(request):
         filtros['almacen'] = request.GET.get('almacen', '').strip()
 
     with connection.cursor() as cursor:
-        query = """
-            SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
-            nombre_empleado_func(usuario_responsable) as nm_responsable,
-            usuario_creacion, centro, almacen
-            FROM INV_PIQUEOS_INVENTARIO_TBL
-            WHERE UPPER(estado) = 'ACTA_PRELIMINAR'
-        """
-        params = []
+        if request.method == 'POST' and request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            query = """
+                SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin,
+                nombre_empleado_func(usuario_responsable) as nm_responsable,
+                usuario_creacion, centro, almacen
+                FROM INV_PIQUEOS_INVENTARIO_TBL
+                WHERE UPPER(estado) = 'ACTA_PRELIMINAR'
+            """
+            params = []
 
-        if filtros.get('almacen'):
-            query += " AND almacen = %s"
-            params.append(filtros['almacen'])
+            if filtros.get('almacen'):
+                query += " AND almacen = %s"
+                params.append(filtros['almacen'])
 
-        query += " ORDER BY fecha_inicio DESC"
+            query += " ORDER BY fecha_inicio DESC"
 
-        print(f"🔍 [TERCER_CONTEO] Query ejecutado: {query}")
-        print(f"🔍 [TERCER_CONTEO] Parámetros: {params}")
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
+            print(f"🔍 [TERCER_CONTEO] Query ejecutado: {query}")
+            print(f"🔍 [TERCER_CONTEO] Parámetros: {params}")
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
 
         cursor.execute("""
             SELECT DISTINCT almacen, centro FROM INV_PIQUEOS_INVENTARIO_TBL
@@ -6417,7 +6419,7 @@ def detalle_tercer_conteo(request, numero_conteo):
             SELECT numero_conteo, codigo_barras AS codigo, codigo_sap, descripcion,
                    marca, talla, ena AS ean, grupo_articulos, groes, ubicacion_4,
                    conteo_4, sap_4, r_pro_4, estado_comparacion_4, diferencia_4,
-                   observacion_4, conteo_3
+                   observacion_4, conteo_3, conteo_fisico
             FROM inv_inventario_fisico_vs_sistema
             WHERE numero_conteo = %s
             AND estado_comparacion_4 != 'CUADRADO'
@@ -6444,6 +6446,7 @@ def detalle_tercer_conteo(request, numero_conteo):
             'diferencia_4': row[14],
             'observacion_4': row[15],
             'conteo_3': row[16],
+            'conteo_fisico': row[17],
         }
         for row in rows
     ]
@@ -6506,6 +6509,15 @@ def guardar_detalle_tercer_conteo(request):
 
             almacen = conteo_row[0]
 
+            cursor.execute("""
+                SELECT id, conteo_4
+                FROM inv_inventario_fisico_vs_sistema
+                WHERE numero_conteo = %s AND codigo_sap = %s AND ena = %s
+            """, [numero_conteo, codigo_sap, ean])
+            prev_row = cursor.fetchone()
+            diferencia_id = prev_row[0] if prev_row else 0
+            conteo_anterior = prev_row[1] if prev_row else None
+
             cursor.callproc('genera_conteo_4', [
                 numero_conteo,
                 almacen,
@@ -6533,6 +6545,27 @@ def guardar_detalle_tercer_conteo(request):
                     'message': 'No se encontro el registro para actualizar la observacion'
                 }, status=404)
 
+            usuario_ses = request.session.get('usuario', {})
+            nombre_usuario = str(usuario_ses.get('nombre', '') or '').strip()
+            cedula_usuario = str(usuario_ses.get('cedula', '') or '').strip()
+
+            cursor.execute("""
+                INSERT INTO INV_DIFERENCIA_LOG_TBL (
+                    DIFERENCIA_ID, NUMERO_CONTEO, ALMACEN,
+                    NOMBRE_USUARIO, CEDULA_USUARIO, PROCESO,
+                    CODIGO_SAP, CONTEO_ANTERIOR, CONTEO_NUEVA,
+                    EAN, FECHA_MODIFICACION
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    'MODIFICACION_ADMINISTRATIVO',
+                    %s, %s, %s, %s, SYSTIMESTAMP
+                )
+            """, [
+                diferencia_id, numero_conteo, almacen,
+                nombre_usuario, cedula_usuario,
+                codigo_sap, conteo_anterior, conteo_4, ean
+            ])
+
             connection.commit()
 
         return JsonResponse({
@@ -6554,6 +6587,79 @@ def guardar_detalle_tercer_conteo(request):
             'success': False,
             'message': f'Error al guardar el detalle: {str(e)}'
         }, status=500)
+
+
+def auditoria_tercer_conteo(request, numero_conteo):
+    if 'usuario' not in request.session:
+        return JsonResponse({'success': False, 'message': 'No autenticado'}, status=401)
+
+    perfil_completo = request.session.get('perfil_seleccionado', {})
+    perfil_nombre = perfil_completo.get('nombre', '') if isinstance(perfil_completo, dict) else ''
+
+    if perfil_nombre != "ADMINISTRATIVO":
+        return JsonResponse({'success': False, 'message': 'No tiene permisos'}, status=403)
+
+    if request.method != 'GET':
+        return JsonResponse({'success': False, 'message': 'Metodo no permitido'}, status=405)
+
+    filtro_ean = request.GET.get('ean', '').strip()
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT almacen FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE numero_conteo = %s
+        """, [numero_conteo])
+        row_check = cursor.fetchone()
+        if not row_check:
+            return JsonResponse({'success': False, 'message': 'No se encontro el conteo'}, status=404)
+
+    try:
+        with connection.cursor() as cursor:
+            query = """
+                SELECT LOG_ID, DIFERENCIA_ID, NUMERO_CONTEO, ALMACEN,
+                       NOMBRE_USUARIO, CEDULA_USUARIO, PROCESO, CODIGO_SAP,
+                       CONTEO_ANTERIOR, CONTEO_NUEVA, EAN,
+                       TO_CHAR(FECHA_MODIFICACION, 'YYYY-MM-DD HH24:MI:SS')
+                FROM INV_DIFERENCIA_LOG_TBL
+                WHERE NUMERO_CONTEO = %s
+            """
+            params = [numero_conteo]
+
+            if filtro_ean:
+                query += " AND LOWER(EAN) LIKE %s"
+                params.append(f"%{filtro_ean.lower()}%")
+
+            query += """
+                ORDER BY FECHA_MODIFICACION DESC, LOG_ID DESC
+            """
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        auditoria = [
+            {
+                'log_id': row[0], 'diferencia_id': row[1],
+                'numero_conteo': row[2], 'almacen': row[3],
+                'nombre_usuario': row[4], 'cedula_usuario': row[5],
+                'proceso': row[6], 'codigo_sap': row[7],
+                'conteo_anterior': row[8], 'conteo_nueva': row[9],
+                'ean': row[10], 'fecha_modificacion': row[11],
+            }
+            for row in rows
+        ]
+
+        return JsonResponse({
+            'success': True,
+            'numero_conteo': numero_conteo,
+            'auditoria': auditoria,
+            'total': len(auditoria),
+        })
+
+    except Exception as e:
+        print(f"❌ [AUDITORIA_TERCER_CONTEO] Error: {str(e)}")
+        mensaje = str(e)
+        if 'ORA-00942' in mensaje:
+            mensaje = 'No existe la tabla INV_DIFERENCIA_LOG_TBL. Ejecute el script de creacion.'
+        return JsonResponse({'success': False, 'message': mensaje}, status=500)
 
 
 @require_http_methods(["POST"])
@@ -6840,6 +6946,8 @@ def auditoria_verifica_segundo_conteo(request, numero_conteo):
     if request.method != 'GET':
         return JsonResponse({'success': False, 'message': 'Metodo no permitido'}, status=405)
 
+    filtro_ean = request.GET.get('ean', '').strip()
+
     with connection.cursor() as cursor:
         cursor.execute("""
             SELECT almacen FROM INV_PIQUEOS_INVENTARIO_TBL
@@ -6851,15 +6959,24 @@ def auditoria_verifica_segundo_conteo(request, numero_conteo):
 
     try:
         with connection.cursor() as cursor:
-            cursor.execute("""
+            query = """
                 SELECT LOG_ID, DIFERENCIA_ID, NUMERO_CONTEO, ALMACEN,
                        NOMBRE_USUARIO, CEDULA_USUARIO, PROCESO, CODIGO_SAP,
                        CONTEO_ANTERIOR, CONTEO_NUEVA, EAN,
                        TO_CHAR(FECHA_MODIFICACION, 'YYYY-MM-DD HH24:MI:SS')
                 FROM INV_DIFERENCIA_LOG_TBL
                 WHERE NUMERO_CONTEO = %s
+            """
+            params = [numero_conteo]
+
+            if filtro_ean:
+                query += " AND LOWER(EAN) LIKE %s"
+                params.append(f"%{filtro_ean.lower()}%")
+
+            query += """
                 ORDER BY FECHA_MODIFICACION DESC, LOG_ID DESC
-            """, [numero_conteo])
+            """
+            cursor.execute(query, params)
             rows = cursor.fetchall()
 
         auditoria = [

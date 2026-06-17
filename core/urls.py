@@ -73,6 +73,7 @@ urlpatterns = [
     path('tercer-conteo/', views.tercer_conteo, name='tercer_conteo'),
     path('detalle-tercer-conteo/<str:numero_conteo>/', views.detalle_tercer_conteo, name='detalle_tercer_conteo'),
     path('guardar-detalle-tercer-conteo/', views.guardar_detalle_tercer_conteo, name='guardar_detalle_tercer_conteo'),
+    path('auditoria-tercer-conteo/<str:numero_conteo>/', views.auditoria_tercer_conteo, name='auditoria_tercer_conteo'),
     path('actualizar-estado-tercer-conteo/', views.actualizar_estado_tercer_conteo, name='actualizar_estado_tercer_conteo'),
     path('acta-final/', views.acta_final, name='acta_final'),
     path('formulario-acta-final/', views.formulario_acta_final, name='formulario_acta_final'),
