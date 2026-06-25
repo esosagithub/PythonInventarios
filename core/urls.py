@@ -7,6 +7,8 @@ urlpatterns = [
     path('', views.custom_login, name='login'),
     path('login/', views.custom_login, name='login'),
     path('dashboard/', views.dashboard, name='dashboard'),
+    path('acta_preliminar_mapeo.html', views.acta_preliminar_mapeo_html, name='acta_preliminar_mapeo_html'),
+    path('acta_final_consolidacion.html', views.acta_final_consolidacion_html, name='acta_final_consolidacion_html'),
     path('administracion-conteo/', views.administracion_conteo, name='administracion_conteo'),
     path('administracion-conteo-jefe/', views.administracion_conteo_jefe, name='administracion_conteo_jefe'),
     path('administracion-conteo/filtrar/', views.administracion_conteo, name='filtrar_conteos'),
@@ -48,6 +50,7 @@ urlpatterns = [
     path('obtener-datos-tienda-piqueo-manual/', views.obtener_datos_tienda_piqueo_manual, name='obtener_datos_tienda_piqueo_manual'),
     path('validar-codigo-barras-piqueo-manual/', views.validar_codigo_barras_piqueo_manual, name='validar_codigo_barras_piqueo_manual'),
     path('guardar-piqueo-manual/', views.guardar_piqueo_manual, name='guardar_piqueo_manual'),
+    path('procesar-piqueo-rfid-primer-conteo/', views.procesar_piqueo_rfid_primer_conteo, name='procesar_piqueo_rfid_primer_conteo'),
     # Reporte Primer Conteo
     path('reporte-primer-conteo/', views.reporte_primer_conteo, name='reporte_primer_conteo'),
     # Segundo Conteo

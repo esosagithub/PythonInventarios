@@ -91,8 +91,8 @@
                                     <button class="btn-icon" title="Asignar Colaboradores" onclick="asignarColaboradores({{ conteo.id }})">
                                         <i class="fas fa-user-plus"></i>
                                     </button>
-                                    <button class="btn-icon {% if conteo.estado|upper != 'PRIMER_CONTEO' %}btn-disabled{% else %}btn-success{% endif %}" 
-                                            title="Finalizar conteo" 
+                                    <button class="btn-icon {% if conteo.estado|upper != 'PRIMER_CONTEO' %}btn-disabled{% else %}btn-success{% endif %}"
+                                            title="Finalizar conteo"
                                             onclick="finalizarConteo({{ conteo.id }}, '{{ conteo.numero_conteo }}', '{{ conteo.almacen }}', '{{ conteo.estado }}')"
                                             {% if conteo.estado|upper != 'PRIMER_CONTEO' %}disabled{% endif %}>
                                         <i class="fas fa-check-circle"></i>

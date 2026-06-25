@@ -140,10 +140,14 @@
                 </div>
                 <button type="button" class="close" onclick="ocultarDetalle()">×</button>
             </div>
-            <div>
+            <div class="detalle-actions">
                 <button type="button" class="btn btn-piqueo-manual" id="btnPiqueoManual"
                     onclick="abrirPiqueoManualGeneral()" style="display: none;">
                     <i class="fas fa-keyboard"></i> Piquear Manual
+                </button>
+                <button type="button" class="btn btn-piqueo-manual" id="btnRFID"
+                    onclick="procesarPiqueoRFID()" style="display: none;">
+                    <i class="fas fa-satellite-dish"></i> RFID
                 </button>
             </div>
             <!-- FILTROS POR UBICACIÓN Y CÓDIGO -->
@@ -431,6 +435,7 @@
     let currentFilters = {};
     let currentSectionCode = '';
     let currentConteoId = null;
+    let currentNumeroConteo = '';
 
     // ========== FUNCIONES DE LOADING ==========
     function showLoading(message = 'Cargando...') {
@@ -503,11 +508,13 @@
                         tbody.innerHTML = '<tr><td colspan="7" class="text-center">No hay detalles disponibles para este piqueo</td></tr>';
                         // Ocultar botón si no hay detalles
                         document.getElementById('btnPiqueoManual').style.display = 'none';
+                        document.getElementById('btnRFID').style.display = 'none';
                     } else {
                         console.log(`✅ Se encontraron ${data.detalles.length} detalles`);
 
                         // ⭐ MOSTRAR BOTÓN PIQUEO MANUAL EN LA PARTE SUPERIOR
                         document.getElementById('btnPiqueoManual').style.display = 'flex';
+                        document.getElementById('btnRFID').style.display = 'flex';
 
                         // Poblar dropdown de ubicaciones (únicas)
                         try {
@@ -571,8 +578,9 @@
 
                     // Actualizar título con número de conteo
                     const numeroConteo = obtenerNumeroConteoDesdeFila(piqueoId);
+                    currentNumeroConteo = numeroConteo;
                     const detalleHeader = document.querySelector('#detalleContainer h2');
-                    detalleHeader.innerHTML = `Detalle del Piqueo: <strong>${numeroConteo}</strong>`;
+                    detalleHeader.innerHTML = 'Detalle del Piqueo';
 
                     document.getElementById('detalleContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
                 } else {
@@ -611,7 +619,16 @@
                 return celdaNumeroConteo.textContent.trim();
             }
         }
-        return 'N/A';
+
+        const botonPorDataId = document.querySelector(`#conteoTableBody button[data-id="${piqueoId}"]`);
+        if (botonPorDataId) {
+            const fila = botonPorDataId.closest('tr');
+            if (fila && fila.cells[0]) {
+                return fila.cells[0].textContent.trim();
+            }
+        }
+
+        return '';
     }
 
     function cargarBarcodesEscaneo(sectionName = '464mostrador1') {
@@ -1120,11 +1137,53 @@
 
         // ⭐ OCULTAR BOTÓN PIQUEO MANUAL
         document.getElementById('btnPiqueoManual').style.display = 'none';
+        document.getElementById('btnRFID').style.display = 'none';
 
         // Restaurar título original
         const detalleHeader = document.querySelector('#detalleContainer h2');
         detalleHeader.innerHTML = 'Detalle del Piqueo';
         currentConteoId = null;
+        currentNumeroConteo = '';
+    }
+
+    async function procesarPiqueoRFID() {
+        if (!currentConteoId) {
+            alert('⚠️ No hay un conteo seleccionado');
+            return;
+        }
+
+        const etiquetaConteo = currentNumeroConteo ? ` ${currentNumeroConteo}` : '';
+        if (!confirm(`¿Desea sincronizar RFID para el conteo${etiquetaConteo}?`)) {
+            return;
+        }
+
+        showLoading('Sincronizando RFID...');
+
+        try {
+            const response = await fetch('/procesar-piqueo-rfid-primer-conteo/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({ piqueo_id: currentConteoId })
+            });
+
+            const data = await response.json();
+            hideLoading();
+
+            if (!data.success) {
+                alert('❌ ' + (data.message || 'No se pudo sincronizar RFID'));
+                return;
+            }
+
+            alert(`✅ RFID sincronizado correctamente\n\nConteo: ${data.numero_conteo}`);
+            cargarDetallePiqueo(currentConteoId);
+        } catch (error) {
+            hideLoading();
+            console.error('❌ Error al sincronizar RFID:', error);
+            alert('Error al sincronizar RFID: ' + error.message);
+        }
     }
     // FUNCIÓN MODIFICADA: Ocultar barcodes y mostrar detalle
     function ocultarBarcodes() {
@@ -1286,7 +1345,8 @@
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCookie('csrftoken')
-                }
+                },
+                body: JSON.stringify({ conteo_id: currentConteoId })
             });
 
             const data = await response.json();
@@ -2127,6 +2187,13 @@
         transition: all 0.2s ease;
         font-size: 11px;
         height: 32px;
+    }
+
+    .detalle-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
     }
 
     /* ========== ESTILOS PARA BOTÓN PIQUEO MANUAL ========== */

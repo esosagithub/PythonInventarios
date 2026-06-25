@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Acta Final — Reglas de Consolidación por Campo</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 13px; margin: 20px; background: #f5f5f5; }
+    h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 8px; }
+    h2 { color: #2980b9; margin-top: 30px; border-left: 4px solid #3498db; padding-left: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+    th { background: #2c3e50; color: #fff; padding: 8px 10px; text-align: left; font-size: 12px; }
+    td { padding: 7px 10px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    .tag-avg  { background: #d5e8d4; color: #2d6a2d; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    .tag-sum  { background: #dae8fc; color: #1a5276; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    .tag-fix  { background: #ffe6cc; color: #7d4800; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    .tag-calc { background: #e1d5e7; color: #4a235a; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    .tag-min  { background: #fff2cc; color: #7d6608; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    .tag-max  { background: #f8cecc; color: #7b1c1c; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    .tag-dist { background: #d0e0e3; color: #1b4f72; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+    code { background: #272822; color: #f8f8f2; padding: 4px 8px; border-radius: 4px; font-size: 11px; display: block; white-space: pre-wrap; font-family: Consolas, monospace; line-height: 1.5; }
+    .note { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 14px; margin: 10px 0; border-radius: 0 4px 4px 0; font-size: 12px; }
+    .col-campo { width: 22%; font-weight: bold; color: #2c3e50; }
+    .col-regla { width: 10%; text-align: center; }
+    .col-fuente { width: 15%; }
+    .col-sql   { width: 53%; }
+  </style>
+</head>
+<body>
+
+<h1>Acta Final — Reglas de Consolidación por Campo</h1>
+
+<div class="note">
+  <strong>Lógica base:</strong> Para cada <code>numero_conteo</code> seleccionado, se verifica si existe algún registro en
+  <code>INV_INVENTARIO_FISICO_VS_SISTEMA</code> con <code>OBSERVACION_4 IS NOT NULL</code>.<br>
+  &bull; Si <strong>NO</strong> existe → se usan los valores ya calculados de <code>ACTA_PRELIMINAR_TBL</code>.<br>
+  &bull; Si <strong>SÍ</strong> existe → los campos de inventario se recalculan desde los campos <code>_4</code> de <code>INV_INVENTARIO_FISICO_VS_SISTEMA</code>.<br>
+  Los campos de personal y SAP siempre vienen de <code>ACTA_PRELIMINAR_TBL</code> independientemente de <code>OBSERVACION_4</code>.
+</div>
+
+<p>
+  Variables usadas en las queries:<br>
+  &bull; <code>:numeros_conteo</code> = lista de <code>numero_conteo</code> seleccionados por el usuario<br>
+  &bull; <code>:piqueo_ids</code> = lista de <code>piqueo_id</code> correspondientes a los conteos seleccionados<br>
+  &bull; <code>:conteos_sin_obs4</code> = conteos sin cambios en tercer conteo (OBSERVACION_4 IS NULL para todos sus items)<br>
+  &bull; <code>:conteos_con_obs4</code> = conteos con al menos un item con OBSERVACION_4 IS NOT NULL
+</p>
+
+<!-- ===== QUERY DETECCIÓN ===== -->
+<h2>Query 0 — Detección de conteos con OBSERVACION_4</h2>
+<table>
+  <tr>
+    <td>
+<code>-- Detecta qué conteos tienen items modificados en el tercer conteo
+SELECT DISTINCT numero_conteo
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :numeros_conteo
+  AND observacion_4 IS NOT NULL</code>
+      <br>
+      Los <code>numero_conteo</code> que aparezcan aquí se procesan con la rama <em>recalcular desde _4</em>.
+      Los que NO aparezcan usan directamente <code>ACTA_PRELIMINAR_TBL</code>.
+    </td>
+  </tr>
+</table>
+
+<!-- ===== QUERY LISTADO ===== -->
+<h2>Query del Listado Principal (acta_final view)</h2>
+<table>
+  <tr>
+    <td>
+<code>-- Muestra solo conteos en TERCER_CONTEO que tienen acta preliminar generada
+SELECT p.piqueo_id, p.numero_conteo, p.estado,
+       p.fecha_inicio, p.fecha_fin,
+       nombre_empleado_func(p.usuario_responsable) AS nm_responsable,
+       p.usuario_creacion, p.centro, p.almacen
+FROM INV_PIQUEOS_INVENTARIO_TBL p
+WHERE UPPER(p.estado) = 'TERCER_CONTEO'
+  AND EXISTS (
+      SELECT 1 FROM acta_preliminar_tbl ap
+      WHERE ap.numero_conteo = p.numero_conteo
+  )
+ORDER BY p.fecha_inicio DESC</code>
+    </td>
+  </tr>
+</table>
+
+<!-- ===== PERSONAL ===== -->
+<h2>Grupo 1 — Personal</h2>
+
+<div class="note">
+  Siempre se toma de <code>ACTA_PRELIMINAR_TBL</code>. Se calcula el PROMEDIO entre los conteos seleccionados
+  (round to nearest integer) porque la misma persona participa en múltiples conteos.
+</div>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL</th>
+  </tr>
+  <tr>
+    <td class="col-campo">jefe_tienda</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(jefe_tienda,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">subjefe_tienda</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(subjefe_tienda,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">auxiliar_ventas</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(auxiliar_ventas,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">auxiliar_caja</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(auxiliar_caja,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">auxiliar_bodega</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(auxiliar_bodega,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">auxiliar_operativo</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(auxiliar_operativo,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">asistente_opertaivo_inventario</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(asistente_opertaivo_inventario,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">jefe_inventarios</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(jefe_inventarios,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">auditor_interno</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(auditor_interno,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">contado</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(contado,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">gerente_regional</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(gerente_regional,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">supervisor_comercial</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(supervisor_comercial,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+</table>
+
+<p><em>Implementación en Python (una sola query para todos los campos de personal):</em></p>
+<code>SELECT
+    ROUND(AVG(NVL(jefe_tienda,0))),
+    ROUND(AVG(NVL(subjefe_tienda,0))),
+    ROUND(AVG(NVL(auxiliar_ventas,0))),
+    ROUND(AVG(NVL(auxiliar_caja,0))),
+    ROUND(AVG(NVL(auxiliar_bodega,0))),
+    ROUND(AVG(NVL(auxiliar_operativo,0))),
+    ROUND(AVG(NVL(asistente_opertaivo_inventario,0))),
+    ROUND(AVG(NVL(jefe_inventarios,0))),
+    ROUND(AVG(NVL(auditor_interno,0))),
+    ROUND(AVG(NVL(contado,0))),
+    ROUND(AVG(NVL(gerente_regional,0))),
+    ROUND(AVG(NVL(supervisor_comercial,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code>
+
+<!-- ===== STOCK SAP ===== -->
+<h2>Grupo 2 — Stock SAP</h2>
+
+<div class="note">
+  Los <strong>valores numéricos</strong> de SAP se promedian (el sistema SAP tiene un stock a cierta fecha;
+  al promediar entre conteos del mismo almacén se obtiene el stock representativo).
+  Las <strong>descripciones</strong> (CALZADO, ROPA, etc.) son texto fijo, se toma del conteo más reciente.
+</div>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL</th>
+  </tr>
+  <tr>
+    <td class="col-campo">stock_sap_descripcion_calzado<br>stock_sap_descripcion_ropa<br>stock_sap_descripcion_accesorio<br>stock_sap_descripcion_fundas<br>stock_sap_descripcion_otros</td>
+    <td class="col-regla"><span class="tag-fix">FIJO</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL (más reciente)</td>
+    <td><code>SELECT stock_sap_descripcion_calzado,
+       stock_sap_descripcion_ropa,
+       stock_sap_descripcion_accesorio,
+       stock_sap_descripcion_fundas,
+       stock_sap_descripcion_otros
+FROM acta_preliminar_tbl
+WHERE piqueo_id = (
+    SELECT MAX(piqueo_id)
+    FROM acta_preliminar_tbl
+    WHERE numero_conteo IN :numeros_conteo
+)</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">stock_sap_valor_calzado</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(stock_sap_valor_calzado,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">stock_sap_valor_ropa</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(stock_sap_valor_ropa,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">stock_sap_valor_accesorio</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(stock_sap_valor_accesorio,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">stock_sap_valor_fundas</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(stock_sap_valor_fundas,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">stock_sap_valor_otros</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(stock_sap_valor_otros,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">stock_sap_total</td>
+    <td class="col-regla"><span class="tag-avg">AVG</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT ROUND(AVG(NVL(stock_sap_total,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+</table>
+
+<!-- ===== ITEMS INVENTARIO ===== -->
+<h2>Grupo 3 — Items de Inventario</h2>
+
+<div class="note">
+  Para cada conteo se evalúa si tiene <code>OBSERVACION_4 IS NOT NULL</code>:<br>
+  &bull; <strong>Sin obs4</strong>: se usan los valores guardados en <code>ACTA_PRELIMINAR_TBL</code><br>
+  &bull; <strong>Con obs4</strong>: se recalcula desde <code>INV_INVENTARIO_FISICO_VS_SISTEMA</code> usando campos <code>_4</code><br>
+  Luego se <strong>SUMA</strong> el resultado de todos los conteos.
+</div>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL (por conteo, luego SUM en Python)</th>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_marcas</td>
+    <td class="col-regla"><span class="tag-dist">DISTINCT</span></td>
+    <td class="col-fuente">INV siempre (DISTINCT real)</td>
+    <td><code>-- Se recalcula siempre desde INV para contar marcas únicas reales
+SELECT COUNT(DISTINCT marca)
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_lineas</td>
+    <td class="col-regla"><span class="tag-dist">DISTINCT</span></td>
+    <td class="col-fuente">INV siempre (DISTINCT real)</td>
+    <td><code>-- Se recalcula siempre desde INV para contar líneas únicas reales
+SELECT COUNT(DISTINCT SUBSTR(grupo_articulos, 7, 3))
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_items</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">AP o INV según obs4</td>
+    <td><code>-- Rama SIN obs4 (desde ACTA_PRELIMINAR_TBL):
+SELECT SUM(NVL(cantidad_items,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :conteos_sin_obs4
+
+-- Rama CON obs4 (recalcular desde INV):
+SELECT SUM(NVL(conteo_4,0))
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :conteos_con_obs4</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_items_faltantes</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">AP o INV según obs4</td>
+    <td><code>-- Rama SIN obs4:
+SELECT SUM(NVL(cantidad_items_faltantes,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :conteos_sin_obs4
+
+-- Rama CON obs4:
+SELECT SUM(CASE WHEN estado_comparacion_4='FALTANTE'
+               THEN NVL(diferencia_4,0) ELSE 0 END)
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :conteos_con_obs4</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_items_sobrantes</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">AP o INV según obs4</td>
+    <td><code>-- Rama SIN obs4:
+SELECT SUM(NVL(cantidad_items_sobrantes,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :conteos_sin_obs4
+
+-- Rama CON obs4:
+SELECT ABS(SUM(CASE WHEN estado_comparacion_4='SOBRANTE'
+                    THEN NVL(diferencia_4,0) ELSE 0 END))
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :conteos_con_obs4</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">valor_items_faltantes</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">AP o INV según obs4</td>
+    <td><code>-- Rama SIN obs4:
+SELECT SUM(NVL(valor_items_faltantes,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :conteos_sin_obs4
+
+-- Rama CON obs4:
+SELECT ABS(SUM(CASE WHEN estado_comparacion_4='FALTANTE'
+                    THEN NVL(diferencia_4,0)*NVL(pvp,0) ELSE 0 END))
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :conteos_con_obs4</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">valor_items_sobrantes</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">AP o INV según obs4</td>
+    <td><code>-- Rama SIN obs4:
+SELECT SUM(NVL(valor_items_sobrantes,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :conteos_sin_obs4
+
+-- Rama CON obs4:
+SELECT SUM(CASE WHEN estado_comparacion_4='SOBRANTE'
+               THEN NVL(diferencia_4,0)*NVL(pvp,0) ELSE 0 END)
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :conteos_con_obs4</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">lineas_diferencias</td>
+    <td class="col-regla"><span class="tag-calc">CALC</span></td>
+    <td class="col-fuente">Calculado</td>
+    <td><code>-- Se calcula en Python:
+lineas_diferencias = cantidad_items_faltantes + cantidad_items_sobrantes</code></td>
+  </tr>
+</table>
+
+<!-- ===== ACUMULADOS ===== -->
+<h2>Grupo 4 — Acumulados Anuales e Inventario Anterior</h2>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL</th>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_item_acumula_anual</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(cantidad_item_acumula_anual,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_item_ultimo_inv</td>
+    <td class="col-regla"><span class="tag-fix">FIJO</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL (más reciente)</td>
+    <td><code>-- Es la referencia del inventario anterior (mismo valor en todos los conteos)
+SELECT cantidad_item_ultimo_inv
+FROM acta_preliminar_tbl
+WHERE piqueo_id = (
+    SELECT MAX(piqueo_id) FROM acta_preliminar_tbl
+    WHERE numero_conteo IN :numeros_conteo
+)</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">numero_toma_fisica_anterior</td>
+    <td class="col-regla"><span class="tag-fix">FIJO</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL (más reciente)</td>
+    <td><code>SELECT numero_toma_fisica_anterior
+FROM acta_preliminar_tbl
+WHERE piqueo_id = (
+    SELECT MAX(piqueo_id) FROM acta_preliminar_tbl
+    WHERE numero_conteo IN :numeros_conteo
+)</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">fecha_toma_fisica_anterior</td>
+    <td class="col-regla"><span class="tag-fix">FIJO</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL (más reciente)</td>
+    <td><code>SELECT fecha_toma_fisica_anterior
+FROM acta_preliminar_tbl
+WHERE piqueo_id = (
+    SELECT MAX(piqueo_id) FROM acta_preliminar_tbl
+    WHERE numero_conteo IN :numeros_conteo
+)</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">cantidad_toma_revisada</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(cantidad_toma_revisada,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+</table>
+
+<!-- ===== CALCULADOS ===== -->
+<h2>Grupo 5 — Campos Calculados</h2>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL / Fórmula</th>
+  </tr>
+  <tr>
+    <td class="col-campo">porcentaje_inventario</td>
+    <td class="col-regla"><span class="tag-calc">CALC</span></td>
+    <td class="col-fuente">Calculado en Python</td>
+    <td><code>-- Se calcula con los valores finales:
+porcentaje = ROUND((cantidad_items_total / stock_sap_total_avg) * 100, 2)
+-- donde:
+--   cantidad_items_total = SUMA de cantidad_items de todos los conteos
+--   stock_sap_total_avg  = PROMEDIO de stock_sap_total de acta_preliminar_tbl</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">total_items_por_inventariar</td>
+    <td class="col-regla"><span class="tag-calc">CALC</span></td>
+    <td class="col-fuente">Calculado en Python</td>
+    <td><code>total_items_por_inventariar = MAX(0, stock_sap_total_avg - cantidad_items_total)</code></td>
+  </tr>
+</table>
+
+<!-- ===== FECHAS ===== -->
+<h2>Grupo 6 — Fechas</h2>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL</th>
+  </tr>
+  <tr>
+    <td class="col-campo">fecha_primer_conteo</td>
+    <td class="col-regla"><span class="tag-min">MIN</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT MIN(fecha_primer_conteo)
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">fecha_ultimo_conteo</td>
+    <td class="col-regla"><span class="tag-max">MAX</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL / INV</td>
+    <td><code>-- Si hay conteos CON obs4: usar MAX(fecha_conteo_4) de INV
+SELECT MAX(fecha_conteo_4)
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :conteos_con_obs4
+
+-- Si NO hay conteos con obs4: usar MAX(fecha_segundo_conteo) de ACTA_PRELIMINAR
+SELECT MAX(fecha_segundo_conteo)
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :conteos_sin_obs4</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">hora_genero_informe_inven_sap</td>
+    <td class="col-regla"><span class="tag-max">MAX</span></td>
+    <td class="col-fuente">INV_INVENTARIO_FISICO_VS_SISTEMA</td>
+    <td><code>SELECT MAX(fecha_precio)
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+</table>
+
+<!-- ===== FINANCIERO ===== -->
+<h2>Grupo 7 — Financiero (Caja)</h2>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL</th>
+  </tr>
+  <tr>
+    <td class="col-campo">valor_efectivo</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(valor_efectivo,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">valor_facturas</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(valor_facturas,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">valor_cheques</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(valor_cheques,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">fondo_caja</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(fondo_caja,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">fondo_sueltos</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(fondo_sueltos,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">total</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(total,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">total_gastos_ejecucion_toma_fisica</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(total_gastos_ejecucion_toma_fisica,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+  <tr>
+    <td class="col-campo">horas_suspendidas_atencion_cliente</td>
+    <td class="col-regla"><span class="tag-sum">SUMA</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL</td>
+    <td><code>SELECT SUM(NVL(horas_suspendidas_atencion_cliente,0))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td>
+  </tr>
+</table>
+
+<!-- ===== DATOS FIJOS ===== -->
+<h2>Grupo 8 — Datos Fijos (del conteo más reciente)</h2>
+
+<div class="note">
+  Todos estos campos se toman del registro con el <code>MAX(piqueo_id)</code> en <code>ACTA_PRELIMINAR_TBL</code>,
+  que corresponde al conteo más reciente seleccionado.
+</div>
+
+<table>
+  <tr>
+    <th class="col-campo">Campo en ACTA_FINAL_TBL</th>
+    <th class="col-regla">Regla</th>
+    <th class="col-fuente">Fuente</th>
+    <th class="col-sql">SQL unificado para todos los campos fijos</th>
+  </tr>
+  <tr>
+    <td class="col-campo">
+      centro<br>almacen<br>empresa<br>pais<br>concepto<br>tienda<br>
+      codigo_inventario<br>toma_fisica_grupo<br>confirmo_encerado_guia_remi<br>
+      sucursal<br>sap_hcm_mcu<br>
+      stock_sap_descripcion_calzado<br>stock_sap_descripcion_ropa<br>
+      stock_sap_descripcion_accesorio<br>stock_sap_descripcion_fundas<br>
+      stock_sap_descripcion_otros<br>
+      ultima_fact_caja1..5<br>
+      ultimo_doc_guia_remision<br>ultimo_doc_nota_credit<br>
+      cargo_1..8, nombre_cargo_1..8
+    </td>
+    <td class="col-regla"><span class="tag-fix">FIJO</span></td>
+    <td class="col-fuente">ACTA_PRELIMINAR_TBL (MAX piqueo_id)</td>
+    <td><code>SELECT
+    centro, almacen, empresa, pais, concepto, tienda,
+    codigo_inventario, toma_fisica_grupo, confirmo_encerado_guia_remi,
+    sucursal, sap_hcm_mcu,
+    stock_sap_descripcion_calzado, stock_sap_descripcion_ropa,
+    stock_sap_descripcion_accesorio, stock_sap_descripcion_fundas,
+    stock_sap_descripcion_otros,
+    fecha_toma_fisica_anterior, cantidad_item_ultimo_inv,
+    numero_toma_fisica_anterior,
+    porcentaje_inventario, total_items_por_inventariar
+FROM acta_preliminar_tbl
+WHERE piqueo_id = (
+    SELECT MAX(piqueo_id)
+    FROM acta_preliminar_tbl
+    WHERE numero_conteo IN :numeros_conteo
+)</code></td>
+  </tr>
+</table>
+
+<!-- ===== RESUMEN QUERIES EN PYTHON ===== -->
+<h2>Resumen: Queries en Python (formulario_acta_final)</h2>
+
+<code>with connection.cursor() as cursor:
+
+    # Q0 — Detectar conteos con obs4
+    cursor.execute("""
+        SELECT DISTINCT numero_conteo
+        FROM inv_inventario_fisico_vs_sistema
+        WHERE numero_conteo IN ({ph})
+          AND observacion_4 IS NOT NULL
+    """, numeros_conteo)
+    conteos_con_obs4 = {str(r[0]) for r in cursor.fetchall()}
+    conteos_sin_obs4 = [n for n in numeros_conteo if n not in conteos_con_obs4]
+    conteos_con_obs4 = list(conteos_con_obs4)
+
+    # Q1 — Datos fijos + SAP + personal en AVG + fechas MIN/MAX (una sola query)
+    cursor.execute("""
+        SELECT
+            -- Datos fijos (del registro más reciente)
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN centro END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN almacen END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN empresa END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN pais END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN concepto END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN tienda END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN codigo_inventario END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN toma_fisica_grupo END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN confirmo_encerado_guia_remi END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN sucursal END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN sap_hcm_mcu END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN stock_sap_descripcion_calzado END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN stock_sap_descripcion_ropa END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN stock_sap_descripcion_accesorio END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN stock_sap_descripcion_fundas END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN stock_sap_descripcion_otros END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN fecha_toma_fisica_anterior END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cantidad_item_ultimo_inv END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN numero_toma_fisica_anterior END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_1 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_1 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_2 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_2 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_3 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_3 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_4 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_4 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_5 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_5 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_6 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_6 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_7 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_7 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN cargo_8 END),
+            MAX(CASE WHEN piqueo_id = maxp.max_pid THEN nombre_cargo_8 END),
+            -- Personal: AVG
+            ROUND(AVG(NVL(jefe_tienda,0))),
+            ROUND(AVG(NVL(subjefe_tienda,0))),
+            ROUND(AVG(NVL(auxiliar_ventas,0))),
+            ROUND(AVG(NVL(auxiliar_caja,0))),
+            ROUND(AVG(NVL(auxiliar_bodega,0))),
+            ROUND(AVG(NVL(auxiliar_operativo,0))),
+            ROUND(AVG(NVL(asistente_opertaivo_inventario,0))),
+            ROUND(AVG(NVL(jefe_inventarios,0))),
+            ROUND(AVG(NVL(auditor_interno,0))),
+            ROUND(AVG(NVL(contado,0))),
+            ROUND(AVG(NVL(gerente_regional,0))),
+            ROUND(AVG(NVL(supervisor_comercial,0))),
+            -- Stock SAP: AVG
+            ROUND(AVG(NVL(stock_sap_valor_calzado,0))),
+            ROUND(AVG(NVL(stock_sap_valor_ropa,0))),
+            ROUND(AVG(NVL(stock_sap_valor_accesorio,0))),
+            ROUND(AVG(NVL(stock_sap_valor_fundas,0))),
+            ROUND(AVG(NVL(stock_sap_valor_otros,0))),
+            ROUND(AVG(NVL(stock_sap_total,0))),
+            -- Acumulados: SUM
+            SUM(NVL(cantidad_item_acumula_anual,0)),
+            SUM(NVL(cantidad_toma_revisada,0)),
+            -- Financiero: SUM
+            SUM(NVL(valor_efectivo,0)),
+            SUM(NVL(valor_facturas,0)),
+            SUM(NVL(valor_cheques,0)),
+            SUM(NVL(fondo_caja,0)),
+            SUM(NVL(fondo_sueltos,0)),
+            SUM(NVL(total,0)),
+            SUM(NVL(total_gastos_ejecucion_toma_fisica,0)),
+            SUM(NVL(horas_suspendidas_atencion_cliente,0)),
+            -- Fechas
+            MIN(fecha_primer_conteo),
+            MAX(fecha_segundo_conteo)
+        FROM acta_preliminar_tbl ap
+        CROSS JOIN (
+            SELECT MAX(piqueo_id) AS max_pid
+            FROM acta_preliminar_tbl
+            WHERE numero_conteo IN ({ph})
+        ) maxp
+        WHERE ap.numero_conteo IN ({ph})
+    """, numeros_conteo * 2)
+
+    # Q2 — Items inventario desde ACTA_PRELIMINAR (conteos SIN obs4)
+    if conteos_sin_obs4:
+        cursor.execute("""
+            SELECT SUM(NVL(cantidad_items,0)),
+                   SUM(NVL(cantidad_items_faltantes,0)),
+                   SUM(NVL(cantidad_items_sobrantes,0)),
+                   SUM(NVL(valor_items_faltantes,0)),
+                   SUM(NVL(valor_items_sobrantes,0))
+            FROM acta_preliminar_tbl
+            WHERE numero_conteo IN ({ph_sin})
+        """, conteos_sin_obs4)
+
+    # Q3 — Items inventario recalculados desde INV (conteos CON obs4)
+    if conteos_con_obs4:
+        cursor.execute("""
+            SELECT SUM(NVL(conteo_4,0)),
+                   SUM(CASE WHEN estado_comparacion_4='FALTANTE' THEN NVL(diferencia_4,0) ELSE 0 END),
+                   ABS(SUM(CASE WHEN estado_comparacion_4='SOBRANTE' THEN NVL(diferencia_4,0) ELSE 0 END)),
+                   ABS(SUM(CASE WHEN estado_comparacion_4='FALTANTE' THEN NVL(diferencia_4,0)*NVL(pvp,0) ELSE 0 END)),
+                   SUM(CASE WHEN estado_comparacion_4='SOBRANTE' THEN NVL(diferencia_4,0)*NVL(pvp,0) ELSE 0 END)
+            FROM inv_inventario_fisico_vs_sistema
+            WHERE numero_conteo IN ({ph_con})
+        """, conteos_con_obs4)
+
+    # Q4 — Marcas y líneas DISTINCT (siempre desde INV, todos los conteos)
+    cursor.execute("""
+        SELECT COUNT(DISTINCT marca),
+               COUNT(DISTINCT SUBSTR(grupo_articulos, 7, 3)),
+               MAX(fecha_conteo_4),
+               MAX(fecha_precio)
+        FROM inv_inventario_fisico_vs_sistema
+        WHERE numero_conteo IN ({ph})
+    """, numeros_conteo)</code>
+
+<br>
+<p style="color:#666; font-size:11px; text-align:center;">
+  Generado: 2026-06-24 | Inventarios — Acta Final Consolidación
+</p>
+
+</body>
+</html>

@@ -107,9 +107,15 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Fecha Último Conteo</label>
+                            <label>Fecha Segundo Conteo</label>
                             <input type="text" class="form-control" name="fecha_segundo_conteo"
                                 value="{{ datos_conteo.fecha_segundo_conteo }}" readonly>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Fecha Tercer Conteo</label>
+                            <input type="text" class="form-control" name="fecha_tercer_conteo"
+                                value="{{ datos_conteo.fecha_tercer_conteo }}" readonly>
                         </div>
 
                         <input type="hidden" name="numeros_conteo" value="{{ datos_conteo.numeros_conteo }}">
@@ -165,32 +171,32 @@
                         <div class="form-group">
                             <label>Asistente Control Inventario</label>
                             <input type="number" class="form-control" name="asistente_opertaivo_inventario"
-                                value="{{ datos_conteo.asistente_opertaivo_inventario }}" min="0">
+                                value="{{ datos_conteo.asistente_opertaivo_inventario }}" readonly>
                         </div>
                         <div class="form-group">
                             <label>Jefe Regional de Inventarios</label>
                             <input type="number" class="form-control" name="jefe_inventarios"
-                                value="{{ datos_conteo.jefe_inventarios }}" min="0">
+                                value="{{ datos_conteo.jefe_inventarios }}" readonly>
                         </div>
                         <div class="form-group">
                             <label>Auditor Interno</label>
                             <input type="number" class="form-control" name="auditor_interno"
-                                value="{{ datos_conteo.auditor_interno }}" min="0">
+                                value="{{ datos_conteo.auditor_interno }}" readonly>
                         </div>
                         <div class="form-group">
                             <label>Contador</label>
                             <input type="number" class="form-control" name="contado"
-                                value="{{ datos_conteo.contado }}" min="0">
+                                value="{{ datos_conteo.contado }}" readonly>
                         </div>
                         <div class="form-group">
                             <label>Gerente Regional</label>
                             <input type="number" class="form-control" name="gerente_regional"
-                                value="{{ datos_conteo.gerente_regional }}" min="0">
+                                value="{{ datos_conteo.gerente_regional }}" readonly>
                         </div>
                         <div class="form-group">
                             <label>Supervisor Comercial</label>
                             <input type="number" class="form-control" name="supervisor_comercial"
-                                value="{{ datos_conteo.supervisor_comercial }}" min="0">
+                                value="{{ datos_conteo.supervisor_comercial }}" readonly>
                         </div>
                     </div>
                 </div>
@@ -550,11 +556,39 @@
         return document.querySelector('[name=csrfmiddlewaretoken]').value;
     }
 
+    function normalizarNumeroLocal(valor) {
+        if (!valor && valor !== 0) return '0';
+
+        let limpio = valor.toString()
+            .replace(/[^\d.,\-]/g, '')
+            .replace(/\s/g, '');
+
+        if (!limpio) return '0';
+
+        const negativo = limpio.startsWith('-');
+        if (negativo) limpio = limpio.substring(1);
+
+        const ultimoPunto = limpio.lastIndexOf('.');
+        const ultimaComa = limpio.lastIndexOf(',');
+
+        if (ultimoPunto !== -1 && ultimaComa !== -1) {
+            const decimalSep = ultimoPunto > ultimaComa ? '.' : ',';
+            const milesSep = decimalSep === '.' ? ',' : '.';
+            limpio = limpio.replaceAll(milesSep, '').replace(decimalSep, '.');
+        } else if (ultimoPunto !== -1 || ultimaComa !== -1) {
+            const sep = ultimoPunto !== -1 ? '.' : ',';
+            const partes = limpio.split(sep);
+            const decimal = partes.pop();
+            const entero = partes.join('');
+            limpio = decimal.length === 3 && entero ? entero + decimal : entero + '.' + decimal;
+        }
+
+        return negativo ? '-' + limpio : limpio;
+    }
+
     function formatoMoneda(valor) {
         if (!valor || valor === '') return '0,00';
-        let numero = valor.toString().replace(/[^\d.,\-]/g, '');
-        numero = numero.replace(',', '.');
-        let num = parseFloat(numero) || 0;
+        let num = parseFloat(normalizarNumeroLocal(valor)) || 0;
         return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
@@ -570,9 +604,7 @@
     function calcularTotal() {
         function obtenerValorNumerico(valor) {
             if (!valor) return 0;
-            let limpio = valor.toString().replace(/[^\d.,\-]/g, '');
-            limpio = limpio.replace(',', '.');
-            return parseFloat(limpio) || 0;
+            return parseFloat(normalizarNumeroLocal(valor)) || 0;
         }
         const total = ['valor_efectivo', 'valor_facturas', 'valor_cheques', 'fondo_caja', 'fondo_sueltos']
             .reduce((sum, campo) => {
@@ -595,9 +627,7 @@
         const data = {};
         formData.forEach((value, key) => {
             if (key.includes('valor_') || key.includes('fondo_') || key === 'total' || key === 'total_gastos_ejecucion') {
-                let limpio = value.toString().replace(/[^\d.,\-]/g, '');
-                limpio = limpio.replace(',', '.');
-                data[key] = limpio;
+                data[key] = normalizarNumeroLocal(value);
             } else {
                 data[key] = value;
             }

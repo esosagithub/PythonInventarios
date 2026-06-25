@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Mapeo de Acta Preliminar</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 24px;
+      color: #1f2937;
+      background: #f8fafc;
+    }
+    h1 {
+      margin-bottom: 8px;
+      color: #111827;
+    }
+    p {
+      margin-top: 0;
+      color: #4b5563;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #d1d5db;
+      padding: 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #1f2937;
+      color: #fff;
+      position: sticky;
+      top: 0;
+    }
+    tr:nth-child(even) {
+      background: #f9fafb;
+    }
+    code {
+      white-space: pre-wrap;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 12px;
+      color: #111827;
+    }
+    .critical {
+      background: #fef3c7;
+    }
+  </style>
+</head>
+<body>
+  <h1>Mapeo de Guardado - Acta Preliminar</h1>
+  <p>Tabla final con campos destino, origen y SQL/lógica usada para generar el acta preliminar.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Campo destino</th>
+        <th>Tabla destino</th>
+        <th>Origen / cálculo</th>
+        <th>SQL / lógica usada</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>PIQUEO_ID</td><td>ACTA_PRELIMINAR_TBL</td><td>Conteo seleccionado</td><td><code>SELECT piqueo_id, numero_conteo, almacen, centro, estado FROM INV_PIQUEOS_INVENTARIO_TBL WHERE piqueo_id = %s</code></td></tr>
+      <tr><td>CENTRO</td><td>ACTA_PRELIMINAR_TBL</td><td>Conteo; puede apoyarse en JDE durante el formulario</td><td><code>SELECT numero_conteo, centro, almacen FROM INV_PIQUEOS_INVENTARIO_TBL WHERE piqueo_id = %s
+SELECT sap_hcm_mcu FROM jde_general@... WHERE SAP_WERKS = %s
+Nota: SAP_HCM_MCU se consulta desde JDE, pero no se guarda como columna independiente en ACTA_PRELIMINAR_TBL.</code></td></tr>
+      <tr><td>ALMACEN</td><td>ACTA_PRELIMINAR_TBL</td><td>Conteo</td><td><code>SELECT numero_conteo, centro, almacen FROM INV_PIQUEOS_INVENTARIO_TBL WHERE piqueo_id = %s</code></td></tr>
+      <tr><td>NUMERO_CONTEO</td><td>ACTA_PRELIMINAR_TBL</td><td>Conteo seleccionado</td><td><code>SELECT numero_conteo, centro, almacen FROM INV_PIQUEOS_INVENTARIO_TBL WHERE piqueo_id = %s</code></td></tr>
+      <tr><td>EMPRESA</td><td>ACTA_PRELIMINAR_TBL</td><td>Sesión/JDE</td><td><code>SELECT FE_RAZON_SOCIAL FROM jde_general@... WHERE SAP_WERKS = %s</code></td></tr>
+      <tr><td>PAIS</td><td>ACTA_PRELIMINAR_TBL</td><td>JDE</td><td><code>SELECT PAIS FROM jde_general@... WHERE SAP_WERKS = %s</code></td></tr>
+      <tr><td>CONCEPTO</td><td>ACTA_PRELIMINAR_TBL</td><td>JDE</td><td><code>SELECT tipo_cen FROM jde_general@... WHERE SAP_WERKS = %s</code></td></tr>
+      <tr><td>TIENDA</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>tienda = data.get('tienda', sucursal or almacen)</code></td></tr>
+      <tr><td>SUCURSAL</td><td>ACTA_PRELIMINAR_TBL</td><td>JDE/Formulario</td><td><code>SELECT punto_emision FROM jde_general@... WHERE SAP_WERKS = %s</code></td></tr>
+      <tr><td>FECHA_PRIMER_CONTEO</td><td>ACTA_PRELIMINAR_TBL</td><td>Función JDE / fallback inventario</td><td><code>SELECT fecha_primerPickeo_func(%s) FROM dual
+SELECT MAX(fecha) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE NUMERO_CONTEO = %s</code></td></tr>
+      <tr><td>FECHA_SEGUNDO_CONTEO</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT DISTINCT MAX(fecha_conteo_2) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE NUMERO_CONTEO = %s</code></td></tr>
+      <tr><td>JEFE_TIENDA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE 'JEFE%%' AND piqueo_id = %s</code></td></tr>
+      <tr><td>SUBJEFE_TIENDA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE 'SUB JEFE%%' AND piqueo_id = %s</code></td></tr>
+      <tr><td>AUXILIAR_VENTAS</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE '%%VENTAS%%' AND piqueo_id = %s</code></td></tr>
+      <tr><td>AUXILIAR_CAJA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE '%%CAJ%%' AND piqueo_id = %s</code></td></tr>
+      <tr><td>AUXILIAR_BODEGA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE '%%BODEGA%%' AND piqueo_id = %s</code></td></tr>
+      <tr><td>AUXILIAR_OPERATIVO</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE '%%OPERATIVO%%' AND piqueo_id = %s</code></td></tr>
+      <tr><td>ASISTENTE_OPERTAIVO_INVENTARIO</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['asistente_opertaivo_inventario']</code></td></tr>
+      <tr><td>JEFE_INVENTARIOS</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['jefe_inventarios']</code></td></tr>
+      <tr><td>AUDITOR_INTERNO</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['auditor_interno']</code></td></tr>
+      <tr><td>CONTADO</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['contado']</code></td></tr>
+      <tr><td>GERENTE_REGIONAL</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['gerente_regional']</code></td></tr>
+      <tr><td>SUPERVISOR_COMERCIAL</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['supervisor_comercial']</code></td></tr>
+      <tr><td>STOCK_SAP_DESCRIPCION_CALZADO</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>CASE WHEN SUBSTR(s.letztver,1,1)='C' THEN 'CALZADO'</code></td></tr>
+      <tr><td>STOCK_SAP_VALOR_CALZADO</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>SUM(s.mbwbest) desde SAP_S032@... agrupado por tipo C</code></td></tr>
+      <tr><td>STOCK_SAP_DESCRIPCION_ROPA</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>CASE WHEN SUBSTR(s.letztver,1,1)='R' THEN 'ROPA'</code></td></tr>
+      <tr><td>STOCK_SAP_VALOR_ROPA</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>SUM(s.mbwbest) desde SAP_S032@... agrupado por tipo R</code></td></tr>
+      <tr><td>STOCK_SAP_DESCRIPCION_ACCESORIO</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>CASE WHEN SUBSTR(s.letztver,1,1)='A' THEN 'ACCESORIO'</code></td></tr>
+      <tr><td>STOCK_SAP_VALOR_ACCESORIO</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>SUM(s.mbwbest) desde SAP_S032@... agrupado por tipo A</code></td></tr>
+      <tr><td>STOCK_SAP_DESCRIPCION_FUNDAS</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP; visible como BOLSAS</td><td><code>CASE WHEN SUBSTR(s.letztver,1,1)='B' THEN 'FUNDAS'; label en formulario/PDF: BOLSAS</code></td></tr>
+      <tr><td>STOCK_SAP_VALOR_FUNDAS</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP; visible como bolsas</td><td><code>SUM(s.mbwbest) desde SAP_S032@... agrupado por tipo B</code></td></tr>
+      <tr><td>STOCK_SAP_DESCRIPCION_OTROS</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>ELSE 'OTROS'</code></td></tr>
+      <tr><td>STOCK_SAP_VALOR_OTROS</td><td>ACTA_PRELIMINAR_TBL</td><td>SAP</td><td><code>SUM(s.mbwbest) desde SAP_S032@... agrupado por OTROS</code></td></tr>
+      <tr><td>STOCK_SAP_TOTAL</td><td>ACTA_PRELIMINAR_TBL</td><td>Cálculo</td><td><code>SUM(STOCK_SAP_VALOR_CALZADO + ROPA + ACCESORIO + FUNDAS + OTROS)</code></td></tr>
+      <tr><td>CANTIDAD_MARCAS</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT COUNT(DISTINCT marca) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s</code></td></tr>
+      <tr><td>CANTIDAD_LINEAS</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT COUNT(DISTINCT SUBSTR(grupo_articulos,7,3)) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s</code></td></tr>
+      <tr class="critical"><td>CANTIDAD_ITEMS</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT SUM(conteo_4) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s</code></td></tr>
+      <tr class="critical"><td>CANTIDAD_ITEMS_FALTANTES</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT SUM(DIFERENCIA_4) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s AND estado_comparacion_3 = 'FALTANTE'</code></td></tr>
+      <tr class="critical"><td>CANTIDAD_ITEMS_SOBRANTES</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT ABS(SUM(DIFERENCIA_4)) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s AND estado_comparacion_3 = 'SOBRANTE'</code></td></tr>
+      <tr class="critical"><td>VALOR_ITEMS_FALTANTES</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT SUM(DIFERENCIA_4 * PVP) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s AND estado_comparacion_3 = 'FALTANTE'; Python aplica ABS()</code></td></tr>
+      <tr class="critical"><td>VALOR_ITEMS_SOBRANTES</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT SUM(DIFERENCIA_4 * PVP) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s AND estado_comparacion_3 = 'SOBRANTE'</code></td></tr>
+      <tr><td>CODIGO_INVENTARIO</td><td>ACTA_PRELIMINAR_TBL</td><td>Conteo</td><td><code>codigo_inventario = numero_conteo</code></td></tr>
+      <tr><td>LINEAS_DIFERENCIAS</td><td>ACTA_PRELIMINAR_TBL</td><td>Cálculo</td><td><code>CANTIDAD_ITEMS_FALTANTES + CANTIDAD_ITEMS_SOBRANTES</code></td></tr>
+      <tr><td>HORA_GENERO_INFORME_INVEN_SAP</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT MAX(fecha_precio) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE numero_conteo = %s</code></td></tr>
+      <tr><td>TOMA_FISICA_GRUPO</td><td>ACTA_PRELIMINAR_TBL</td><td>Detalle piqueo</td><td><code>SELECT DISTINCT grupo_articulos FROM INV_DETALLE_PIQUEOS_INVENTARIOS_TBL WHERE piqueo_id = %s AND ROWNUM = 1</code></td></tr>
+      <tr><td>CONFIRMO_ENCERADO_GUIA_REMI</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['confirmo_encerado_guia_remi']</code></td></tr>
+      <tr><td>FECHA_TOMA_FISICA_ANTERIOR</td><td>ACTA_PRELIMINAR_TBL</td><td>Actas anteriores</td><td><code>SELECT MAX(fecha_toma_fisica_anterior) FROM ACTA_PRELIMINAR_TBL WHERE empresa = %s AND centro = %s AND tienda = %s</code></td></tr>
+      <tr><td>CANTIDAD_ITEM_ULTIMO_INV</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico año anterior</td><td><code>SELECT SUM(CONTEO_3) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE TO_CHAR(fecha,'YYYY') = TO_CHAR(ADD_MONTHS(SYSDATE, -12),'YYYY') AND SUBSTR(numero_conteo,7,4) = %s</code></td></tr>
+      <tr><td>NUMERO_TOMA_FISICA_ANTERIOR</td><td>ACTA_PRELIMINAR_TBL</td><td>Piqueos año anterior</td><td><code>SELECT COUNT(*) FROM INV_PIQUEOS_INVENTARIO_TBL WHERE TO_CHAR(fecha_inicio,'YYYY') = TO_CHAR(ADD_MONTHS(SYSDATE, -12),'YYYY') AND SUBSTR(numero_conteo,7,4) = %s</code></td></tr>
+      <tr><td>CANTIDAD_ITEM_ACUMULA_ANUAL</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico año actual</td><td><code>SELECT SUM(CONTEO_3) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE TO_CHAR(fecha,'YYYY') = TO_CHAR(SYSDATE,'YYYY') AND SUBSTR(numero_conteo,7,4) = %s</code></td></tr>
+      <tr><td>VALOR_EFECTIVO</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['valor_efectivo']</code></td></tr>
+      <tr><td>VALOR_FACTURAS</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['valor_facturas']</code></td></tr>
+      <tr><td>VALOR_CHEQUES</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['valor_cheques']</code></td></tr>
+      <tr><td>FONDO_CAJA</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['fondo_caja']</code></td></tr>
+      <tr><td>FONDO_SUELTOS</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['fondo_sueltos']</code></td></tr>
+      <tr><td>TOTAL</td><td>ACTA_PRELIMINAR_TBL</td><td>Cálculo formulario</td><td><code>valor_efectivo + valor_facturas + valor_cheques + fondo_caja + fondo_sueltos</code></td></tr>
+      <tr><td>ULTIMA_FACT_CAJA1</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['ultima_fact_caja1']</code></td></tr>
+      <tr><td>ULTIMA_FACT_CAJA2</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['ultima_fact_caja2']</code></td></tr>
+      <tr><td>ULTIMA_FACT_CAJA3</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['ultima_fact_caja3']</code></td></tr>
+      <tr><td>ULTIMA_FACT_CAJA4</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['ultima_fact_caja4']</code></td></tr>
+      <tr><td>ULTIMA_FACT_CAJA5</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['ultima_fact_caja5']</code></td></tr>
+      <tr><td>ULTIMO_DOC_GUIA_REMISION</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['ultimo_doc_guia_remision']</code></td></tr>
+      <tr><td>ULTIMO_DOC_NOTA_CREDIT</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['ultimo_doc_nota_credit']</code></td></tr>
+      <tr><td>ESTADO</td><td>ACTA_PRELIMINAR_TBL</td><td>Fijo</td><td><code>'ACTIVO'</code></td></tr>
+      <tr><td>CANTIDAD_TOMA_REVISADA</td><td>ACTA_PRELIMINAR_TBL</td><td>Secuenciales activos</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_SECUENCIAL_DETA_TBL WHERE estado = 'ACTIVO' AND secuencial_id IN (...)</code></td></tr>
+      <tr><td>PORCENTAJE_INVENTARIO</td><td>ACTA_PRELIMINAR_TBL</td><td>Cálculo</td><td><code>(CANTIDAD_ITEMS / STOCK_SAP_TOTAL) * 100</code></td></tr>
+      <tr><td>TOTAL_ITEMS_POR_INVENTARIAR</td><td>ACTA_PRELIMINAR_TBL</td><td>Cálculo</td><td><code>STOCK_SAP_TOTAL - CANTIDAD_ITEMS; si es negativo, 0</code></td></tr>
+      <tr><td>HORAS_SUSPENDIDAS_ATENCION_CLIENTE</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['horas_suspendidas_atencion']</code></td></tr>
+      <tr><td>TOTAL_GASTOS_EJECUCION_TOMA_FISICA</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>data['total_gastos_ejecucion']</code></td></tr>
+      <tr><td>CARGO_1 / NOMBRE_CARGO_1</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>gerente_operaciones_cargo / gerente_operaciones_firma</code></td></tr>
+      <tr><td>CARGO_2 / NOMBRE_CARGO_2</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>jefe_inventarios_cargo / jefe_inventarios_firma</code></td></tr>
+      <tr><td>CARGO_3 / NOMBRE_CARGO_3</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>supervisor_comercial_cargo / supervisor_comercial_firma</code></td></tr>
+      <tr><td>CARGO_4 / NOMBRE_CARGO_4</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>asistente_control_inventarios_cargo / asistente_control_inventarios_firma</code></td></tr>
+      <tr><td>CARGO_5 / NOMBRE_CARGO_5</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>jefe_tienda_cargo / jefe_tienda_firma</code></td></tr>
+      <tr><td>CARGO_6 / NOMBRE_CARGO_6</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>sub_jefe_tienda_cargo / sub_jefe_tienda_firma</code></td></tr>
+      <tr><td>CARGO_7 / NOMBRE_CARGO_7</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>contador_general_cargo / contador_general_firma</code></td></tr>
+      <tr><td>CARGO_8 / NOMBRE_CARGO_8</td><td>ACTA_PRELIMINAR_TBL</td><td>Formulario</td><td><code>auditor_interno_cargo / auditor_interno_firma</code></td></tr>
+      <tr><td>ESTADO</td><td>INV_PIQUEOS_INVENTARIO_TBL</td><td>Actualización posterior al guardado</td><td><code>UPDATE INV_PIQUEOS_INVENTARIO_TBL SET estado = 'ACTA_PRELIMINAR' WHERE piqueo_id = %s</code></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

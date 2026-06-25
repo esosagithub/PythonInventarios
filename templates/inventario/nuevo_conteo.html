@@ -685,23 +685,28 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             console.log('Datos recibidos:', data);
 
+            // Deduplicar por MCU para evitar registros duplicados del web service
+            const dataUnica = Array.from(
+                new Map((data || []).map(almacen => [almacen.mcu, almacen])).values()
+            );
+
             // Guarda los datos de almacenes para usar depués
-            datosAlmacenes = data;
+            datosAlmacenes = dataUnica;
 
             // Poblar el select
             selectAlmacen.innerHTML = '';
-            
-            if (data && data.length > 0) {
-                console.log(`${data.length} almacenes encontrados`);
-                
+
+            if (dataUnica && dataUnica.length > 0) {
+                console.log(`${dataUnica.length} almacenes encontrados (${data.length} originales)`);
+
                 // Opción por defecto
                 const defaultOption = document.createElement('option');
                 defaultOption.value = '';
                 defaultOption.textContent = '-- Seleccione un almacén --';
                 selectAlmacen.appendChild(defaultOption);
-                
+
                 // Ordenar y agregar almacenes
-                data.sort((a, b) => a.mcu.localeCompare(b.mcu))
+                dataUnica.sort((a, b) => a.mcu.localeCompare(b.mcu))
                     .forEach(almacen => {
                         const option = document.createElement('option');
                         option.value = almacen.mcu;
@@ -718,6 +723,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 option.textContent = 'No hay almacenes disponibles';
                 selectAlmacen.appendChild(option);
             }
+
 
         } catch (error) {
             console.error('Error en carga de almacenes:', error);

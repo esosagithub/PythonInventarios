@@ -180,7 +180,8 @@
                             <th>RPRO</th>
                             <th>Estado</th>
                             <th>Diferencia</th>
-                            <th>Observación</th>
+                            <th>Observación ADM</th>
+                            <th>Observación Jefe</th>
                             <th>Ubicación</th>
                             <th>Código SAP</th>
                             <th>EAN</th>
@@ -470,7 +471,7 @@
         const total = detalleFilteredData.length;
 
         if (!total) {
-            tbody.innerHTML = '<tr><td colspan="17" style="text-align:center;padding:20px;">No hay diferencias para este conteo.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="18" style="text-align:center;padding:20px;">No hay diferencias para este conteo.</td></tr>';
             pagination.style.display = 'none';
             document.getElementById('detallePaginationSummary').textContent = '0-0 of 0 records';
             return;
@@ -518,6 +519,7 @@
                 <td>${escapeHtml(item.estado_comparacion_4)}</td>
                 <td>${escapeHtml(item.diferencia_4)}</td>
                 <td><input type="text" id="editObservacion4" class="inline-edit-input inline-edit-observation" value="${escapeHtml(item.observacion_4)}"></td>
+                <td>${escapeHtml(item.observaciones_segundo_conteo)}</td>
                 <td>${escapeHtml(item.ubicacion_4)}</td>
                 <td>${escapeHtml(item.codigo_sap)}</td>
                 <td>${escapeHtml(item.ean)}</td>
@@ -545,6 +547,7 @@
             <td>${escapeHtml(item.estado_comparacion_4)}</td>
             <td>${escapeHtml(item.diferencia_4)}</td>
             <td>${escapeHtml(item.observacion_4)}</td>
+            <td>${escapeHtml(item.observaciones_segundo_conteo)}</td>
             <td>${escapeHtml(item.ubicacion_4)}</td>
             <td>${escapeHtml(item.codigo_sap)}</td>
             <td>${escapeHtml(item.ean)}</td>

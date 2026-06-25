@@ -62,47 +62,50 @@
     <div class="main-content" id="mainContent">
         <div class="content-header">
             <h1>Acta Final</h1>
-            <p>Visualización de conteos en estado Tercer Conteo</p>
+            <p>Consulta actas generadas y conteos pendientes de acta final</p>
         </div>
 
+        <!-- Filtros -->
         <div class="card" style="margin-bottom: 12px;">
-            <div class="filter-form">
-                <div class="filter-grid">
-                    <div class="form-group">
-                        <label for="filtroAlmacen">Filtrar por Almacén</label>
-                        <select id="filtroAlmacen" class="form-control">
-                            <option value="">-- Todos los almacenes --</option>
-                            {% for alm in almacenes_disponibles %}
-                            <option value="{{ alm.almacen }}" {% if filtro_almacen == alm.almacen %}selected{% endif %}>
-                                {{ alm.almacen }}{% if alm.centro %} - {{ alm.centro }}{% endif %}
-                            </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="form-group" style="justify-content: flex-end; flex-direction: row; align-items: flex-end; gap: 8px;">
-                        <button class="btn btn-primary" onclick="aplicarFiltros()">
-                            <i class="fas fa-filter"></i> Filtrar
-                        </button>
-                        <button class="btn btn-secondary" onclick="limpiarFiltros()">
-                            <i class="fas fa-times"></i> Limpiar
-                        </button>
-                        <button class="btn btn-success" onclick="generarActa()">
-                            <i class="fas fa-file-signature"></i> Genera Acta
-                        </button>
-                    </div>
+            <div class="filter-grid">
+                <div class="form-group">
+                    <label for="filtroTipo">Tipo</label>
+                    <select id="filtroTipo" class="form-control" onchange="onTipoChange()">
+                        <option value="">-- Seleccione --</option>
+                        <option value="pendientes">Pendientes (Tercer Conteo)</option>
+                        <option value="generadas">Actas Finales Generadas</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="filtroAlmacen">Almacén</label>
+                    <select id="filtroAlmacen" class="form-control" disabled>
+                        <option value="">-- Seleccione un tipo primero --</option>
+                    </select>
+                </div>
+                <div class="form-group" style="justify-content: flex-end; flex-direction: row; align-items: flex-end; gap: 8px;">
+                    <button class="btn btn-primary" onclick="buscar()">
+                        <i class="fas fa-search"></i> Buscar
+                    </button>
+                    <button class="btn btn-secondary" onclick="limpiar()">
+                        <i class="fas fa-times"></i> Limpiar
+                    </button>
+                    <button id="btnGenerarActa" class="btn btn-success" onclick="generarActa()" style="display:none;">
+                        <i class="fas fa-file-signature"></i> Genera Acta
+                    </button>
                 </div>
             </div>
         </div>
 
+        <!-- Estadística -->
         <div class="stats-grid" style="margin-bottom: 15px;">
             <div class="stat-card">
-                <h3 id="statTotal">{{ estadisticas.total }}</h3>
-                <small>Total en Tercer Conteo</small>
+                <h3 id="statTotal">0</h3>
+                <small id="statLabel">Resultados</small>
             </div>
         </div>
 
-        {% if actas_finales %}
-        <div class="card" id="actasGeneradasContainer">
+        <!-- Tabla: Actas Generadas -->
+        <div class="card" id="actasGeneradasContainer" style="display:none;">
             <h2>Actas Finales Generadas</h2>
             <div class="table-responsive">
                 <table class="data-table">
@@ -117,34 +120,15 @@
                             <th>Acciones</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {% for acta in actas_finales %}
-                        <tr>
-                            <td style="max-width:220px; word-break:break-all;">{{ acta.numeros_conteo }}</td>
-                            <td>{{ acta.centro }}</td>
-                            <td>{{ acta.almacen }}</td>
-                            <td><span class="status-badge">{{ acta.estado }}</span></td>
-                            <td>{{ acta.fecha_creacion }}</td>
-                            <td>{{ acta.usuario_creacion }}</td>
-                            <td>
-                                <button class="btn btn-primary btn-icon" title="Imprimir"
-                                    onclick="imprimirActaFinal({{ acta.acta_final_id }})">
-                                    <i class="fas fa-print"></i>
-                                </button>
-                                <button class="btn btn-secondary btn-icon" title="Eliminar"
-                                    onclick="eliminarActaFinal({{ acta.acta_final_id }}, '{{ acta.numeros_conteo }}')">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                        {% endfor %}
+                    <tbody id="actasTableBody">
+                        <tr><td colspan="7" class="empty-msg">Use el filtro para consultar actas finales generadas.</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
-        {% endif %}
 
-        <div id="conteosContainer" class="card">
+        <!-- Tabla: Pendientes -->
+        <div class="card" id="conteosContainer" style="display:none;">
             <h2>Conteos Pendientes (Tercer Conteo)</h2>
             <div class="table-responsive">
                 <table class="data-table">
@@ -162,35 +146,17 @@
                         </tr>
                     </thead>
                     <tbody id="conteoTableBody">
-                        {% for conteo in conteos %}
-                        <tr>
-                            <td>
-                                <input type="checkbox" class="conteo-checkbox" value="{{ conteo.numero_conteo }}"
-                                    data-centro="{{ conteo.centro|default_if_none:'' }}"
-                                    data-almacen="{{ conteo.almacen|default_if_none:'' }}">
-                            </td>
-                            <td>{{ conteo.numero_conteo }}</td>
-                            <td>
-                                <span class="status-badge status-{{ conteo.estado|lower }}">
-                                    {{ conteo.estado }}
-                                </span>
-                            </td>
-                            <td>{{ conteo.fecha_inicio }}</td>
-                            <td>{{ conteo.fecha_fin }}</td>
-                            <td>{{ conteo.nm_responsable }}</td>
-                            <td>{{ conteo.usuario_creacion }}</td>
-                            <td>{{ conteo.centro }}</td>
-                            <td>{{ conteo.almacen }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="9" style="text-align: center; padding: 20px;">
-                                No hay conteos en estado Tercer Conteo.
-                            </td>
-                        </tr>
-                        {% endfor %}
+                        <tr><td colspan="9" class="empty-msg">Use el filtro para consultar conteos pendientes.</td></tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Estado inicial: sin búsqueda -->
+        <div class="card" id="initialState">
+            <div style="text-align:center; padding: 40px 20px; color:#888;">
+                <i class="fas fa-search" style="font-size:40px; margin-bottom:12px; opacity:0.4;"></i>
+                <p style="font-size:15px; margin:0;">Seleccione un tipo y presione <strong>Buscar</strong> para ver resultados.</p>
             </div>
         </div>
     </div>
@@ -199,8 +165,6 @@
 <script src="{% static 'js/dashboard.js' %}"></script>
 {% csrf_token %}
 <script>
-    let currentFilters = {};
-
     function showLoading(message = 'Cargando...') {
         const overlay = document.getElementById('loadingOverlay');
         overlay.querySelector('p').textContent = message;
@@ -217,27 +181,23 @@
 
     function escapeHtml(value) {
         return String(value ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
     }
 
-    function aplicarFiltros() {
-        const almacen = document.getElementById('filtroAlmacen').value.trim();
-        currentFilters = { almacen };
-        cargarConteos();
-    }
+    function onTipoChange() {
+        const tipo = document.getElementById('filtroTipo').value;
+        const selAlmacen = document.getElementById('filtroAlmacen');
+        document.getElementById('btnGenerarActa').style.display = (tipo === 'pendientes') ? 'flex' : 'none';
 
-    function limpiarFiltros() {
-        document.getElementById('filtroAlmacen').value = '';
-        currentFilters = {};
-        cargarConteos();
-    }
+        selAlmacen.innerHTML = '<option value="">Cargando...</option>';
+        selAlmacen.disabled = true;
 
-    function cargarConteos() {
-        showLoading('Aplicando filtros...');
+        if (!tipo) {
+            selAlmacen.innerHTML = '<option value="">-- Seleccione un tipo primero --</option>';
+            return;
+        }
 
         fetch('{% url "acta_final" %}', {
             method: 'POST',
@@ -246,27 +206,111 @@
                 'X-CSRFToken': getCsrfToken(),
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({ filtros: currentFilters })
+            body: JSON.stringify({ action: 'get_almacenes', tipo })
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
-            hideLoading();
-            actualizarTabla(data.conteos);
-            document.getElementById('statTotal').textContent = data.estadisticas.total;
+            const opts = ['<option value="">-- Todos --</option>'];
+            (data.almacenes || []).forEach(a => {
+                const label = a.centro ? `${a.almacen} — ${a.centro}` : a.almacen;
+                opts.push(`<option value="${escapeHtml(a.almacen)}">${escapeHtml(label)}</option>`);
+            });
+            selAlmacen.innerHTML = opts.join('');
+            selAlmacen.disabled = false;
         })
-        .catch(error => {
-            hideLoading();
-            console.error('Error al cargar conteos:', error);
+        .catch(() => {
+            selAlmacen.innerHTML = '<option value="">-- Error al cargar --</option>';
         });
     }
 
-    function actualizarTabla(conteos) {
-        const tbody = document.getElementById('conteoTableBody');
-        if (conteos.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;">No hay conteos en estado Tercer Conteo.</td></tr>';
+    function limpiar() {
+        document.getElementById('filtroTipo').value = '';
+        document.getElementById('filtroAlmacen').innerHTML = '<option value="">-- Seleccione un tipo primero --</option>';
+        document.getElementById('filtroAlmacen').disabled = true;
+        document.getElementById('btnGenerarActa').style.display = 'none';
+        document.getElementById('actasGeneradasContainer').style.display = 'none';
+        document.getElementById('conteosContainer').style.display = 'none';
+        document.getElementById('initialState').style.display = 'block';
+        document.getElementById('statTotal').textContent = '0';
+        document.getElementById('statLabel').textContent = 'Resultados';
+    }
+
+    function buscar() {
+        const tipo = document.getElementById('filtroTipo').value;
+        if (!tipo) {
+            alert('Seleccione un tipo de búsqueda (Pendientes o Actas Generadas).');
             return;
         }
 
+        const almacen = document.getElementById('filtroAlmacen').value;
+        showLoading('Buscando...');
+
+        fetch('{% url "acta_final" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ filtros: { tipo, almacen } })
+        })
+        .then(r => r.json())
+        .then(data => {
+            hideLoading();
+            document.getElementById('initialState').style.display = 'none';
+            document.getElementById('statTotal').textContent = data.estadisticas.total;
+
+            if (data.tipo === 'generadas') {
+                document.getElementById('statLabel').textContent = 'Actas Generadas';
+                document.getElementById('conteosContainer').style.display = 'none';
+                document.getElementById('actasGeneradasContainer').style.display = 'block';
+                renderActas(data.actas_finales);
+            } else {
+                document.getElementById('statLabel').textContent = 'Conteos Pendientes';
+                document.getElementById('actasGeneradasContainer').style.display = 'none';
+                document.getElementById('conteosContainer').style.display = 'block';
+                renderConteos(data.conteos);
+            }
+        })
+        .catch(err => {
+            hideLoading();
+            console.error(err);
+            alert('Error al realizar la búsqueda.');
+        });
+    }
+
+    function renderActas(actas) {
+        const tbody = document.getElementById('actasTableBody');
+        if (!actas || actas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-msg">No se encontraron actas finales.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = actas.map(a => `
+            <tr>
+                <td style="max-width:220px;word-break:break-all;">${escapeHtml(a.numeros_conteo)}</td>
+                <td>${escapeHtml(a.centro)}</td>
+                <td>${escapeHtml(a.almacen)}</td>
+                <td><span class="status-badge">${escapeHtml(a.estado)}</span></td>
+                <td>${escapeHtml(a.fecha_creacion)}</td>
+                <td>${escapeHtml(a.usuario_creacion || '-')}</td>
+                <td>
+                    <button class="btn btn-primary btn-icon" title="Imprimir" onclick="imprimirActaFinal(${a.acta_final_id})">
+                        <i class="fas fa-print"></i>
+                    </button>
+                    <button class="btn btn-secondary btn-icon" title="Eliminar" onclick="eliminarActaFinal(${a.acta_final_id}, '${escapeHtml(a.numeros_conteo)}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function renderConteos(conteos) {
+        const tbody = document.getElementById('conteoTableBody');
+        if (!conteos || conteos.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-msg">No se encontraron conteos pendientes.</td></tr>';
+            return;
+        }
         tbody.innerHTML = conteos.map(c => `
             <tr>
                 <td>
@@ -275,7 +319,7 @@
                         data-almacen="${escapeHtml(c.almacen || '')}">
                 </td>
                 <td>${escapeHtml(c.numero_conteo)}</td>
-                <td><span class="status-badge status-${escapeHtml((c.estado || '').toLowerCase())}">${escapeHtml(c.estado)}</span></td>
+                <td><span class="status-badge status-${escapeHtml((c.estado||'').toLowerCase())}">${escapeHtml(c.estado)}</span></td>
                 <td>${escapeHtml(c.fecha_inicio)}</td>
                 <td>${escapeHtml(c.fecha_fin)}</td>
                 <td>${escapeHtml(c.nm_responsable || '-')}</td>
@@ -288,22 +332,20 @@
 
     function generarActa() {
         const seleccionados = Array.from(document.querySelectorAll('.conteo-checkbox:checked'));
-        const numerosConteo = seleccionados.map(checkbox => checkbox.value);
-
         if (seleccionados.length === 0) {
             alert('Seleccione al menos un conteo para generar el acta final.');
             return;
         }
 
-        const centros = new Set(seleccionados.map(checkbox => (checkbox.dataset.centro || '').trim().toUpperCase()));
-        const almacenes = new Set(seleccionados.map(checkbox => (checkbox.dataset.almacen || '').trim().toUpperCase()));
-
+        const centros = new Set(seleccionados.map(cb => (cb.dataset.centro || '').trim().toUpperCase()));
+        const almacenes = new Set(seleccionados.map(cb => (cb.dataset.almacen || '').trim().toUpperCase()));
         if (centros.size > 1 || almacenes.size > 1) {
-            alert('No se puede generar el acta final.\n\nTodos los conteos seleccionados deben corresponder al mismo centro y al mismo almacén.');
+            alert('Todos los conteos seleccionados deben corresponder al mismo centro y almacén.');
             return;
         }
 
-        showLoading('Validando conteos seleccionados...');
+        const numerosConteo = seleccionados.map(cb => cb.value);
+        showLoading('Validando conteos...');
 
         fetch('{% url "acta_final" %}', {
             method: 'POST',
@@ -312,25 +354,21 @@
                 'X-CSRFToken': getCsrfToken(),
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({
-                action: 'generar_acta_final',
-                numeros_conteo: numerosConteo
-            })
+            body: JSON.stringify({ action: 'generar_acta_final', numeros_conteo: numerosConteo })
         })
-        .then(response => response.json().then(data => ({ ok: response.ok, data })))
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
         .then(({ ok, data }) => {
             hideLoading();
             if (!ok || !data.success) {
                 alert(data.message || 'No se pudo generar el acta final.');
                 return;
             }
-            // Redirigir al formulario con los conteos seleccionados
             const params = new URLSearchParams({ numeros_conteo: numerosConteo.join(',') });
             window.location.href = '{% url "formulario_acta_final" %}?' + params.toString();
         })
-        .catch(error => {
+        .catch(err => {
             hideLoading();
-            console.error('Error al generar acta final:', error);
+            console.error(err);
             alert('Error al validar los conteos seleccionados.');
         });
     }
@@ -342,45 +380,26 @@
     }
 
     function eliminarActaFinal(actaFinalId, numerosConteo) {
-        if (!confirm('¿Está seguro de eliminar el Acta Final?\n\nConteos: ' + numerosConteo + '\n\nLos conteos volverán al estado TERCER_CONTEO.')) {
-            return;
-        }
-        showLoading('Eliminando acta final...');
+        if (!confirm('¿Está seguro de eliminar el Acta Final?\n\nConteos: ' + numerosConteo + '\n\nLos conteos volverán al estado TERCER_CONTEO.')) return;
+        showLoading('Eliminando...');
         fetch('/eliminar-acta-final/' + actaFinalId + '/', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': getCsrfToken(),
-                'X-Requested-With': 'XMLHttpRequest'
-            }
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
         })
-        .then(response => response.json())
+        .then(r => r.json())
         .then(data => {
             hideLoading();
-            if (data.success) {
-                alert(data.message);
-                window.location.reload();
-            } else {
-                alert('Error: ' + (data.message || 'No se pudo eliminar el acta final.'));
-            }
+            if (data.success) { alert(data.message); buscar(); }
+            else alert('Error: ' + (data.message || 'No se pudo eliminar.'));
         })
-        .catch(error => {
-            hideLoading();
-            console.error('Error:', error);
-            alert('Error al eliminar el acta final.');
-        });
+        .catch(() => { hideLoading(); alert('Error al eliminar el acta final.'); });
     }
 </script>
 
 <style>
-    .filter-form {
-        display: grid;
-        gap: 15px;
-    }
-
     .filter-grid {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: 200px 280px auto;
         gap: 12px;
         align-items: end;
     }
@@ -401,26 +420,16 @@
         padding: 8px 10px;
         border: 2px solid #e9ecef;
         border-radius: 6px;
-        font-size: 12px;
-        transition: all 0.2s ease;
+        font-size: 13px;
         background: white;
-        height: 30px;
-    }
-
-    #filtroAlmacen {
-        width: 100%;
-        min-height: 44px;
-        height: 44px;
-        line-height: 1.4;
-        padding: 10px 40px 10px 12px;
-        font-size: 14px;
+        height: 36px;
         box-sizing: border-box;
     }
 
     .form-control:focus {
         outline: none;
         border-color: #052F62;
-        box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+        box-shadow: 0 0 0 3px rgba(5,47,98,0.1);
     }
 
     .btn {
@@ -432,93 +441,44 @@
         align-items: center;
         gap: 4px;
         font-weight: 500;
-        transition: all 0.2s ease;
         font-size: 11px;
-        height: 32px;
+        height: 36px;
+        transition: all 0.2s ease;
+        white-space: nowrap;
     }
 
-    .btn-primary {
-        background: #052F62;
-        color: white;
-    }
-
-    .btn-primary:hover {
-        background: #031B38;
-        transform: translateY(-1px);
-    }
-
-    .btn-secondary {
-        background: #950404;
-        color: white;
-    }
-
-    .btn-secondary:hover {
-        background: #700202;
-        transform: translateY(-1px);
-    }
-
-    .btn-success {
-        background: #198754;
-        color: white;
-    }
-
-    .btn-success:hover {
-        background: #146c43;
-        transform: translateY(-1px);
-    }
-
-    .conteo-checkbox {
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
-    }
+    .btn-primary { background: #052F62; color: white; }
+    .btn-primary:hover { background: #031B38; transform: translateY(-1px); }
+    .btn-secondary { background: #950404; color: white; }
+    .btn-secondary:hover { background: #700202; transform: translateY(-1px); }
+    .btn-success { background: #198754; color: white; }
+    .btn-success:hover { background: #146c43; transform: translateY(-1px); }
 
     .btn-icon {
-        width: 27px;
-        height: 27px;
-        padding: 0;
-        border: none;
-        cursor: pointer;
-        border-radius: 6px;
-        color: white;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.9em;
-        transition: all 0.2s ease;
-        margin-right: 2px;
+        width: 27px; height: 27px; padding: 0; border: none;
+        cursor: pointer; border-radius: 6px; color: white;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 0.9em; transition: all 0.2s ease; margin-right: 2px;
     }
+    .btn-icon:hover { transform: translateY(-1px); }
 
-    .btn-icon:hover {
-        transform: translateY(-1px);
-    }
+    .conteo-checkbox { width: 16px; height: 16px; cursor: pointer; }
 
     .status-badge {
-        padding: 3px 6px;
-        border-radius: 10px;
-        font-size: 10px;
-        font-weight: 500;
-        background: #c3dbf8ff;
-        color: #052F62;
+        padding: 3px 6px; border-radius: 10px; font-size: 10px;
+        font-weight: 500; background: #c3dbf8ff; color: #052F62;
     }
 
-    .table-responsive {
-        overflow-x: auto;
-    }
+    .empty-msg { text-align: center; padding: 20px; color: #888; font-size: 13px; }
+
+    .table-responsive { overflow-x: auto; }
 
     .card {
-        background: white;
-        border-radius: 8px;
-        padding: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin-bottom: 15px;
+        background: white; border-radius: 8px; padding: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 15px;
     }
 
-    .card h2 {
-        color: #333;
-        margin-bottom: 12px;
-        font-size: 16px;
-    }
+    .card h2 { color: #333; margin-bottom: 12px; font-size: 16px; }
 
     .stats-grid {
         display: grid;
@@ -527,119 +487,47 @@
     }
 
     .stat-card {
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        background: white; padding: 20px; border-radius: 10px;
+        text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         border-left: 4px solid #052F62;
     }
 
-    .stat-card h3 {
-        font-size: 2em;
-        margin: 0;
-        color: #052F62;
-        font-weight: bold;
-    }
+    .stat-card h3 { font-size: 2em; margin: 0; color: #052F62; font-weight: bold; }
+    .stat-card small { color: #666; font-size: 14px; font-weight: 500; }
 
-    .stat-card small {
-        color: #666;
-        font-size: 14px;
-        font-weight: 500;
-    }
+    .data-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11px; }
+    .data-table th, .data-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e4e4e4; }
+    .data-table th { background: #f8f9fa; font-weight: 600; font-size: 11px; }
+    .data-table tr:hover { background: #f8f9fa; }
 
-    .data-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 12px;
-        font-size: 11px;
-    }
-
-    .data-table th,
-    .data-table td {
-        padding: 8px 10px;
-        text-align: left;
-        border-bottom: 1px solid #e4e4e4;
-    }
-
-    .data-table th {
-        background: #f8f9fa;
-        font-weight: 600;
-        font-size: 11px;
-    }
-
-    .data-table tr:hover {
-        background: #f8f9fa;
-    }
-
-    .content-header {
-        margin-bottom: 20px;
-    }
-
-    .content-header h1 {
-        color: #ffffffff;
-        margin: 0 0 8px 0;
-        font-size: 20px;
-    }
-
-    .content-header p {
-        color: #e4e4e4ff;
-        margin: 0;
-        font-size: 12px;
-    }
+    .content-header { margin-bottom: 20px; }
+    .content-header h1 { color: #ffffffff; margin: 0 0 8px 0; font-size: 20px; }
+    .content-header p { color: #e4e4e4ff; margin: 0; font-size: 12px; }
 
     .loading-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.7);
-        z-index: 9999;
-        display: flex;
-        justify-content: center;
-        align-items: center;
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.7); z-index: 9999;
+        display: flex; justify-content: center; align-items: center;
         backdrop-filter: blur(3px);
     }
 
     .loading-spinner {
-        text-align: center;
-        background: white;
-        padding: 25px 40px;
-        border-radius: 12px;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        text-align: center; background: white; padding: 25px 40px;
+        border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
     }
 
     .spinner {
-        border: 3px solid #f3f3f3;
-        border-top: 3px solid #052F62;
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        animation: spin 1s linear infinite;
-        margin: 0 auto 12px;
+        border: 3px solid #f3f3f3; border-top: 3px solid #052F62;
+        border-radius: 50%; width: 40px; height: 40px;
+        animation: spin 1s linear infinite; margin: 0 auto 12px;
     }
 
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-
-    .loading-spinner p {
-        margin: 0;
-        color: #333;
-        font-weight: 600;
-        font-size: 14px;
-    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .loading-spinner p { margin: 0; color: #333; font-weight: 600; font-size: 14px; }
 
     @media (max-width: 768px) {
-        .filter-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .stats-grid {
-            grid-template-columns: 1fr;
-        }
+        .filter-grid { grid-template-columns: 1fr; }
+        .stats-grid { grid-template-columns: 1fr; }
     }
 </style>
 {% endblock %}

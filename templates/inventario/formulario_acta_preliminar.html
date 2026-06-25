@@ -211,12 +211,14 @@
                         {% for item in datos_conteo.stock_sap_items %}
                         <div class="form-group">
                             <label>Descripción</label>
-                            <input type="text" class="form-control" name="stock_sap_descripcion_{{ forloop.counter }}"
-                                value="{{ item.tipo }}" readonly>
+                            <input type="hidden" name="stock_sap_descripcion_{{ forloop.counter }}"
+                                value="{{ item.tipo }}">
+                            <input type="text" class="form-control"
+                                value="{% if item.tipo == 'FUNDAS' %}BOLSAS{% else %}{{ item.tipo }}{% endif %}" readonly>
                         </div>
 
                         <div class="form-group">
-                            <label>Stock {{ item.tipo }}</label>
+                            <label>Stock {% if item.tipo == 'FUNDAS' %}BOLSAS{% else %}{{ item.tipo }}{% endif %}</label>
                             <input type="text" class="form-control" name="stock_sap_valor_{{ forloop.counter }}"
                                 value="{{ item.valor|format_number }}" readonly>
                         </div>
@@ -572,12 +574,43 @@
     }
 
     // ========== FUNCIONES DE FORMATEO DE MONEDA ==========
+    function normalizarNumeroLocal(valor) {
+        if (!valor) return '0';
+
+        let texto = valor.toString()
+            .replace(/[^\d.,\-]/g, '')
+            .replace(/\s/g, '');
+
+        if (!texto) return '0';
+
+        const negativo = texto.startsWith('-');
+        if (negativo) {
+            texto = texto.substring(1);
+        }
+
+        const ultimoPunto = texto.lastIndexOf('.');
+        const ultimaComa = texto.lastIndexOf(',');
+
+        if (ultimoPunto !== -1 && ultimaComa !== -1) {
+            const decimalSep = ultimoPunto > ultimaComa ? '.' : ',';
+            const milesSep = decimalSep === '.' ? ',' : '.';
+            texto = texto.split(milesSep).join('').replace(decimalSep, '.');
+        } else if (ultimoPunto !== -1 || ultimaComa !== -1) {
+            const sep = ultimoPunto !== -1 ? '.' : ',';
+            const partes = texto.split(sep);
+            const decimal = partes.pop();
+            const entero = partes.join('');
+            texto = decimal.length === 3 && entero
+                ? entero + decimal
+                : `${entero || '0'}.${decimal}`;
+        }
+
+        return negativo ? `-${texto}` : texto;
+    }
+
     function formatoMoneda(valor) {
         if (!valor || valor === '') return '0,00';
-        
-        let numero = valor.toString().replace(/[^\d.,\-]/g, '');
-        numero = numero.replace(',', '.');
-        let num = parseFloat(numero) || 0;
+        let num = parseFloat(normalizarNumeroLocal(valor)) || 0;
         
         return num.toLocaleString('es-ES', {
             minimumFractionDigits: 2,
@@ -609,9 +642,7 @@
     function calcularTotal() {
         function obtenerValorNumerico(valor) {
             if (!valor) return 0;
-            let limpio = valor.toString().replace(/[^\d.,\-]/g, '');
-            limpio = limpio.replace(',', '.');
-            return parseFloat(limpio) || 0;
+            return parseFloat(normalizarNumeroLocal(valor)) || 0;
         }
 
         const valorEfectivo = obtenerValorNumerico(document.querySelector('[name="valor_efectivo"]').value);
@@ -643,9 +674,7 @@
         
         formData.forEach((value, key) => {
             if (key.includes('valor_') || key.includes('fondo_') || key === 'total' || key === 'total_gastos_ejecucion') {
-                let limpio = value.toString().replace(/[^\d.,\-]/g, '');
-                limpio = limpio.replace(',', '.');
-                data[key] = limpio;
+                data[key] = normalizarNumeroLocal(value);
             } else {
                 data[key] = value;
             }
@@ -716,24 +745,7 @@
             }
         });
 
-        function validarNombreApellido(valor) {
-            if (!valor || valor.trim() === '') return true;
-            const partes = valor.trim().split(/\s+/);
-            if (partes.length < 2) return false;
-            return partes.every(p => p.length > 3);
-        }
-
-        function mostrarErrorFirma(input, mostrar) {
-            if (mostrar) {
-                input.classList.add('firma-error');
-                input.setCustomValidity('Debe ingresar nombre y apellido válidos (mínimo 4 caracteres cada uno)');
-            } else {
-                input.classList.remove('firma-error');
-                input.setCustomValidity('');
-            }
-        }
-
-        function agregarValidacionFirmas() {
+        function limpiarValidacionFirmas() {
             const firmas = [
                 'gerente_operaciones_firma',
                 'jefe_inventarios_firma',
@@ -747,15 +759,13 @@
             firmas.forEach(nombre => {
                 const input = document.querySelector(`[name="${nombre}"]`);
                 if (input) {
-                    input.addEventListener('input', function () {
-                        mostrarErrorFirma(input, !validarNombreApellido(input.value));
-                    });
-                    mostrarErrorFirma(input, !validarNombreApellido(input.value));
+                    input.classList.remove('firma-error');
+                    input.setCustomValidity('');
                 }
             });
         }
 
-        agregarValidacionFirmas();
+        limpiarValidacionFirmas();
         calcularTotal();
     });
 </script>
