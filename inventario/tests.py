@@ -88,6 +88,71 @@ class AlcanceTiendaTests(SimpleTestCase):
         self.assertEqual(tiendas[0]['mcu'], 'NQN1')
         self.assertEqual(tiendas[0]['almacen'], 'NQN1')
 
+    def test_normaliza_respuesta_de_tienda_con_claves_en_mayusculas(self):
+        tiendas = views._normalizar_tiendas([{
+            'CENTRO': 'EC01',
+            'MCU': 'NQN1',
+            'PAIS': 'ECUADOR',
+            'CECO': '0001NQN1',
+            'NOMINA_NOM': 'USUARIO',
+            'NOMINA_APE': 'PRUEBA',
+            'CEDULA': '1314743970',
+        }])
+
+        self.assertEqual(tiendas[0]['centro'], 'EC01')
+        self.assertEqual(tiendas[0]['mcu'], 'NQN1')
+        self.assertEqual(tiendas[0]['pais'], 'ECUADOR')
+        self.assertEqual(tiendas[0]['ceco'], '0001NQN1')
+        self.assertEqual(tiendas[0]['cedula'], '1314743970')
+        self.assertEqual(tiendas[0]['nomina_nom'], 'USUARIO')
+        self.assertEqual(tiendas[0]['nomina_ape'], 'PRUEBA')
+
+    @patch('inventario.views.requests.post')
+    def test_consulta_tienda_limpia_espacios_de_cedula(self, post):
+        response = Mock()
+        response.json.return_value = []
+        response.raise_for_status.return_value = None
+        post.return_value = response
+
+        views._consultar_tiendas_colaborador('1314743970 ')
+
+        self.assertEqual(
+            json.loads(post.call_args.kwargs['data']),
+            {'cedula': '1314743970'}
+        )
+
+    @patch('inventario.views.requests.post')
+    def test_resuelve_tienda_desde_kostl_cuando_servicio_de_colaborador_viene_vacio(self, post):
+        centros_response = Mock()
+        centros_response.raise_for_status.return_value = None
+        centros_response.json.return_value = [
+            {'centro': 'TELESHOP', 'sociedad': 'E200'},
+            {'centro': 'MARATHON', 'sociedad': 'E200'},
+        ]
+        tiendas_response = Mock()
+        tiendas_response.raise_for_status.return_value = None
+        tiendas_response.json.return_value = [
+            {
+                'ceco': 'E2001YTPA1',
+                'mcu': 'TPA1',
+                'nombre_tienda': 'TELESHOP MALL DEL PACÍFICO',
+            },
+        ]
+        post.side_effect = [centros_response, tiendas_response]
+
+        tiendas = views._consultar_tienda_desde_colaborador({
+            'cedula': '1314743970',
+            'nombre': 'MURILLO MOREIRA DIEGO ARMANDO',
+            'unidad_negocio': 'TELESHOP MALL DEL PACIFICO',
+            'kostl': 'E2001YTPA1',
+            'cod_empresa': 'E200',
+        })
+
+        self.assertEqual(tiendas[0]['centro'], 'TELESHOP')
+        self.assertEqual(tiendas[0]['mcu'], 'TPA1')
+        self.assertEqual(tiendas[0]['ceco'], 'E2001YTPA1')
+        self.assertEqual(tiendas[0]['pais'], 'ECUADOR')
+
     @patch('inventario.views.requests.post')
     def test_jefe_sin_tienda_no_ve_registros(self, post):
         response = Mock()

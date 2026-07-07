@@ -22,6 +22,7 @@ import os
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import time
+import unicodedata
 
 
 def acta_preliminar_mapeo_html(request):
@@ -110,37 +111,118 @@ def _normalizar_tiendas(datos):
     if not isinstance(datos, list):
         return tiendas
 
+    def obtener_valor(tienda, *claves):
+        if not isinstance(tienda, dict):
+            return ''
+
+        claves_normalizadas = {
+            str(clave).lower(): valor
+            for clave, valor in tienda.items()
+        }
+
+        for clave in claves:
+            if clave in tienda:
+                return tienda.get(clave)
+
+            valor = claves_normalizadas.get(str(clave).lower())
+            if valor not in (None, ''):
+                return valor
+
+        return ''
+
     for tienda in datos:
-        centro = str(tienda.get('centro', '') or '').strip()
+        centro = str(obtener_valor(
+            tienda,
+            'centro',
+            'CENTRO',
+            'cod_centro',
+            'COD_CENTRO'
+        ) or '').strip()
         codigo = str(
-            tienda.get('mcu')
-            or tienda.get('almacen')
-            or tienda.get('tienda_codigo')
-            or ''
+            obtener_valor(
+                tienda,
+                'mcu',
+                'MCU',
+                'almacen',
+                'ALMACEN',
+                'tienda_codigo',
+                'TIENDA_CODIGO',
+                'sap_hcm_mcu',
+                'SAP_HCM_MCU'
+            )
         ).strip()
         if not centro or not codigo:
+            print(
+                "[ALCANCE_TIENDA] Tienda omitida por datos incompletos: "
+                f"{tienda!r}"
+            )
             continue
 
         tiendas.append({
             'centro': centro,
             'mcu': codigo,
             'almacen': codigo,
-            'pais': str(tienda.get('pais', '') or '').strip(),
-            'ceco': str(tienda.get('ceco', '') or '').strip(),
+            'pais': str(obtener_valor(
+                tienda,
+                'pais',
+                'PAIS',
+                'pais_descripcion',
+                'PAIS_DESCRIPCION'
+            ) or '').strip(),
+            'ceco': str(obtener_valor(
+                tienda,
+                'ceco',
+                'CECO',
+                'centro_costo',
+                'CENTRO_COSTO'
+            ) or '').strip(),
             'unidad_negocio': str(
-                tienda.get('UNIDAD_NEGOCIO')
-                or tienda.get('unidad_negocio')
-                or ''
+                obtener_valor(
+                    tienda,
+                    'UNIDAD_NEGOCIO',
+                    'unidad_negocio',
+                    'TIENDA',
+                    'tienda'
+                )
             ).strip(),
-            'cedula': str(tienda.get('cedula', '') or '').strip(),
-            'nomina_nom': str(tienda.get('nomina_nom', '') or '').strip(),
-            'nomina_ape': str(tienda.get('nomina_ape', '') or '').strip(),
+            'cedula': str(obtener_valor(
+                tienda,
+                'cedula',
+                'CEDULA',
+                'identificacion',
+                'IDENTIFICACION'
+            ) or '').strip(),
+            'nomina_nom': str(obtener_valor(
+                tienda,
+                'nomina_nom',
+                'NOMINA_NOM',
+                'nombre',
+                'NOMBRE',
+                'COLABORADOR'
+            ) or '').strip(),
+            'nomina_ape': str(obtener_valor(
+                tienda,
+                'nomina_ape',
+                'NOMINA_APE',
+                'apellido',
+                'APELLIDO'
+            ) or '').strip(),
         })
 
     return tiendas
 
 
+def _normalizar_texto_busqueda(valor):
+    texto = str(valor or '').strip().upper()
+    texto = ''.join(
+        caracter for caracter in unicodedata.normalize('NFKD', texto)
+        if not unicodedata.combining(caracter)
+    )
+    return ' '.join(texto.split())
+
+
 def _consultar_tiendas_colaborador(cedula):
+    cedula = str(cedula or '').strip()
     response = requests.post(
         'https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getDatoTiendaColabroador',
         headers={'Content-Type': 'application/json'},
@@ -156,6 +238,120 @@ def _consultar_tiendas_colaborador(cedula):
     return _normalizar_tiendas(datos)
 
 
+def _consultar_tienda_desde_colaborador(usuario):
+    """
+    Fallback para usuarios cuyo endpoint getDatoTiendaColabroador responde [].
+
+    El login de nomina trae KOSTL (centro de costo) y UNIDAD_NEGOCIO. Con esos
+    datos se resuelve el centro del servicio getcenters/getStore y se selecciona
+    la tienda cuyo ceco coincide con KOSTL.
+    """
+    if not isinstance(usuario, dict):
+        return []
+
+    ceco = str(
+        usuario.get('kostl')
+        or usuario.get('KOSTL')
+        or usuario.get('centro_costo')
+        or ''
+    ).strip()
+    unidad_negocio = str(usuario.get('unidad_negocio') or '').strip()
+    cod_empresa = str(
+        usuario.get('cod_empresa')
+        or usuario.get('COD_EMPRESA')
+        or ''
+    ).strip()
+
+    if not ceco or not unidad_negocio:
+        return []
+
+    try:
+        centros_response = requests.post(
+            'https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getcenters',
+            headers={'Content-Type': 'application/json'},
+            data=json.dumps({'pais': 'ecuador'}),
+            timeout=10
+        )
+        centros_response.raise_for_status()
+        centros = centros_response.json()
+    except Exception as e:
+        print(f"[ALCANCE_TIENDA] Error consultando centros fallback: {e}")
+        return []
+
+    unidad_busqueda = _normalizar_texto_busqueda(unidad_negocio)
+    cod_empresa_busqueda = _normalizar_texto_busqueda(cod_empresa)
+    centro_encontrado = ''
+
+    for centro in centros or []:
+        centro_codigo = str(centro.get('centro', '') or '').strip()
+        sociedad = str(centro.get('sociedad', '') or '').strip()
+        if (
+            centro_codigo
+            and unidad_busqueda.startswith(
+                _normalizar_texto_busqueda(centro_codigo)
+            )
+            and (
+                not cod_empresa_busqueda
+                or _normalizar_texto_busqueda(sociedad) == cod_empresa_busqueda
+            )
+        ):
+            centro_encontrado = centro_codigo
+            break
+
+    if not centro_encontrado:
+        print(
+            "[ALCANCE_TIENDA] No se pudo resolver centro fallback para "
+            f"unidad_negocio={unidad_negocio!r}, cod_empresa={cod_empresa!r}"
+        )
+        return []
+
+    try:
+        tiendas_response = requests.post(
+            'https://ns.aseyco.com:444/MSWebServiceNomina/rest/service/getStore',
+            headers={'Content-Type': 'application/json'},
+            data=json.dumps({
+                'pais': 'ecuador',
+                'centro': centro_encontrado.lower()
+            }),
+            timeout=10
+        )
+        tiendas_response.raise_for_status()
+        tiendas = tiendas_response.json()
+    except Exception as e:
+        print(f"[ALCANCE_TIENDA] Error consultando tiendas fallback: {e}")
+        return []
+
+    ceco_busqueda = _normalizar_texto_busqueda(ceco)
+    for tienda in tiendas or []:
+        if _normalizar_texto_busqueda(tienda.get('ceco')) != ceco_busqueda:
+            continue
+
+        tienda_normalizada = {
+            'centro': centro_encontrado,
+            'mcu': str(tienda.get('mcu', '') or '').strip(),
+            'almacen': str(tienda.get('mcu', '') or '').strip(),
+            'pais': 'ECUADOR',
+            'ceco': str(tienda.get('ceco', '') or '').strip(),
+            'unidad_negocio': str(
+                tienda.get('nombre_tienda') or unidad_negocio
+            ).strip(),
+            'cedula': str(usuario.get('cedula', '') or '').strip(),
+            'nomina_nom': str(usuario.get('nombre', '') or '').strip(),
+            'nomina_ape': '',
+        }
+        print(
+            "[ALCANCE_TIENDA] Tienda resuelta por fallback KOSTL: "
+            f"{tienda_normalizada!r}"
+        )
+        return [tienda_normalizada]
+
+    print(
+        "[ALCANCE_TIENDA] No se encontro tienda con ceco fallback: "
+        f"centro={centro_encontrado!r}, ceco={ceco!r}"
+    )
+    return []
+
+
 def _asignaciones_tienda_jefe(request):
     """Return the exact (centro, almacen) pairs assigned to the current manager."""
     if hasattr(request, '_asignaciones_tienda_jefe'):
@@ -167,13 +363,16 @@ def _asignaciones_tienda_jefe(request):
     print(f"[ALCANCE_TIENDA] Consultando tienda para cedula: {cedula!r}")
 
     tiendas = usuario.get('tiendas_asignadas')
-    if tiendas is not None:
+    if tiendas:
         tiendas = _normalizar_tiendas(tiendas)
         print(
             "[ALCANCE_TIENDA] Tiendas recuperadas desde sesion: "
             f"{tiendas!r}"
         )
-    elif cedula:
+    else:
+        tiendas = []
+
+    if not tiendas and cedula:
         try:
             tiendas = _consultar_tiendas_colaborador(cedula)
         except Exception as e:
@@ -182,6 +381,9 @@ def _asignaciones_tienda_jefe(request):
                 f"{cedula!r}: {e}"
             )
             tiendas = []
+
+    if not tiendas:
+        tiendas = _consultar_tienda_desde_colaborador(usuario)
 
     for tienda in tiendas or []:
         centro = tienda['centro']
@@ -407,7 +609,7 @@ def _respuesta_sin_acceso():
 @csrf_exempt
 def custom_login(request):
     if request.method == 'POST':
-        username = request.POST.get('username')
+        username = str(request.POST.get('username') or '').strip()
         password = request.POST.get('password')
 
         # Verificar si es una petición AJAX
@@ -467,6 +669,16 @@ def custom_login(request):
                             "[LOGIN] No se pudo recuperar el codigo de tienda "
                             f"para {username!r}: {e}"
                         )
+                    if not tiendas_asignadas:
+                        tiendas_asignadas = _consultar_tienda_desde_colaborador({
+                            'cedula': username,
+                            'nombre': colaborador.get('COLABORADOR', ''),
+                            'unidad_negocio': colaborador.get(
+                                'UNIDAD_NEGOCIO', ''
+                            ),
+                            'kostl': colaborador.get('KOSTL', ''),
+                            'cod_empresa': colaborador.get('COD_EMPRESA', ''),
+                        })
 
                     tienda_principal = (
                         tiendas_asignadas[0] if tiendas_asignadas else {}
@@ -483,10 +695,12 @@ def custom_login(request):
                         'identificacion': username,
                         'nombre': colaborador.get('COLABORADOR', ''),
                         'empresa': colaborador.get('EMPRESA', ''),
+                        'cod_empresa': colaborador.get('COD_EMPRESA', ''),
                         'cargo': colaborador.get('CARGO', ''),
                         'email': colaborador.get('CORREO_EMPRESARIAL', ''),
                         'region': colaborador.get('REGION', ''),
                         'unidad_negocio': unidad_negocio,
+                        'kostl': colaborador.get('KOSTL', ''),
                         'tienda_codigo': tienda_principal.get('mcu', ''),
                         'mcu': tienda_principal.get('mcu', ''),
                         'almacen': tienda_principal.get('mcu', ''),
@@ -596,8 +810,11 @@ def seleccionar_perfil(request):
 
     # Obtener la identificación del usuario de la sesión
     usuario_sesion = request.session.get('usuario', {})
-    identificacion = usuario_sesion.get(
-        'identificacion', '') or usuario_sesion.get('cedula', '')
+    identificacion = str(
+        usuario_sesion.get('identificacion', '')
+        or usuario_sesion.get('cedula', '')
+        or ''
+    ).strip()
 
     if not identificacion:
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -998,6 +1215,10 @@ def administracion_conteo_jefe(request):
     datos_tienda_jefe = _normalizar_tiendas(
         usuario_sesion.get('tiendas_asignadas', [])
     )
+    if not datos_tienda_jefe and not usuario_cedula:
+        print("❌ [JEFE] No se encontró cédula en la sesión")
+        messages.error(request, 'No se pudo identificar su cédula de usuario')
+
     if not datos_tienda_jefe and usuario_cedula:
         try:
             datos_tienda_jefe = _consultar_tiendas_colaborador(
@@ -1006,18 +1227,29 @@ def administracion_conteo_jefe(request):
             if datos_tienda_jefe:
                 print(
                     f"✅ [JEFE] Datos de tienda encontrados: {len(datos_tienda_jefe)} registros")
-            else:
-                print("⚠️ [JEFE] No se encontraron datos de tienda para el jefe")
-                messages.warning(
-                    request, 'No se encontraron datos de tienda asignada para su usuario')
 
         except Exception as e:
             print(f"❌ [JEFE] Error al obtener datos de tienda: {e}")
             messages.error(
                 request, f'Error al obtener datos de tienda: {str(e)}')
-    else:
-        print("❌ [JEFE] No se encontró cédula en la sesión")
-        messages.error(request, 'No se pudo identificar su cédula de usuario')
+
+    if not datos_tienda_jefe:
+        datos_tienda_jefe = _consultar_tienda_desde_colaborador(usuario_sesion)
+
+    if datos_tienda_jefe:
+        tienda_principal = datos_tienda_jefe[0]
+        usuario_sesion['tiendas_asignadas'] = datos_tienda_jefe
+        usuario_sesion['tienda_codigo'] = tienda_principal.get('mcu', '')
+        usuario_sesion['mcu'] = tienda_principal.get('mcu', '')
+        usuario_sesion['almacen'] = tienda_principal.get('mcu', '')
+        usuario_sesion['centro'] = tienda_principal.get('centro', '')
+        usuario_sesion['centro_costo'] = tienda_principal.get('ceco', '')
+        usuario_sesion['pais'] = tienda_principal.get('pais', '')
+        request.session['usuario'] = usuario_sesion
+    elif usuario_cedula:
+        print("⚠️ [JEFE] No se encontraron datos de tienda para el jefe")
+        messages.warning(
+            request, 'No se encontraron datos de tienda asignada para su usuario')
 
     # Conservar las parejas exactas para no mezclar centros y almacenes.
     request._asignaciones_tienda_jefe = list(dict.fromkeys(
@@ -1330,7 +1562,11 @@ def nuevo_conteo_jefe(request):
     # OBTENER DATOS DEL JEFE DEL WEB SERVICE
     datos_jefe = {}
     usuario_sesion = request.session.get('usuario', {})
-    cedula_jefe = usuario_sesion.get('cedula', '')
+    cedula_jefe = str(usuario_sesion.get('cedula', '') or '').strip()
+    if cedula_jefe and usuario_sesion.get('cedula') != cedula_jefe:
+        usuario_sesion['cedula'] = cedula_jefe
+        usuario_sesion['identificacion'] = cedula_jefe
+        request.session['usuario'] = usuario_sesion
 
     print(f"🔍 [NUEVO_CONTEO_JEFE] Cédula del jefe: {cedula_jefe}")
 
@@ -1366,10 +1602,24 @@ def nuevo_conteo_jefe(request):
                 for key, value in datos_jefe.items():
                     print(f"   {key}: {value}")
             else:
-                print(
-                    "⚠️ [NUEVO_CONTEO_JEFE] No se encontraron datos del jefe en el web service")
-                messages.warning(
-                    request, 'No se encontraron datos de tienda asignada para su usuario')
+                tiendas_fallback = _consultar_tienda_desde_colaborador(
+                    usuario_sesion
+                )
+                if tiendas_fallback:
+                    datos_jefe = dict(tiendas_fallback[0])
+                    usuario_sesion['tiendas_asignadas'] = tiendas_fallback
+                    usuario_sesion['tienda_codigo'] = datos_jefe.get('mcu', '')
+                    usuario_sesion['mcu'] = datos_jefe.get('mcu', '')
+                    usuario_sesion['almacen'] = datos_jefe.get('mcu', '')
+                    usuario_sesion['centro'] = datos_jefe.get('centro', '')
+                    usuario_sesion['centro_costo'] = datos_jefe.get('ceco', '')
+                    usuario_sesion['pais'] = datos_jefe.get('pais', '')
+                    request.session['usuario'] = usuario_sesion
+                else:
+                    print(
+                        "⚠️ [NUEVO_CONTEO_JEFE] No se encontraron datos del jefe en el web service")
+                    messages.warning(
+                        request, 'No se encontraron datos de tienda asignada para su usuario')
 
         except Exception as e:
             print(
