@@ -56,20 +56,40 @@
                     <div class="form-row" style="grid-template-columns: repeat(2, 1fr);">
                         <div class="form-group">
                             <label for="pais">PAÍS:</label>
-                            <select id="pais" name="pais" required>
-                                <option value="">Cargando países...</option>
+                            <select id="pais" name="pais" required {% if datos_tienda_usuario %}class="readonly-field locked-select"{% endif %}>
+                                {% if datos_tienda_usuario %}
+                                    <option value="{{ datos_tienda_usuario.pais }}" selected>{{ datos_tienda_usuario.pais }}</option>
+                                {% elif tiendas_usuario|length > 1 %}
+                                    <option value="">Seleccione una tienda asignada</option>
+                                {% else %}
+                                    <option value="">Cargando países...</option>
+                                {% endif %}
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="centro">CENTRO:</label>
-                            <select id="centro" name="centro" required disabled>
-                                <option value="">Seleccione primero un país</option>
+                            <select id="centro" name="centro" required {% if not datos_tienda_usuario %}disabled{% else %}class="readonly-field locked-select"{% endif %}>
+                                {% if datos_tienda_usuario %}
+                                    <option value="{{ datos_tienda_usuario.centro }}" selected>{{ datos_tienda_usuario.centro }}</option>
+                                {% elif tiendas_usuario|length > 1 %}
+                                    <option value="">Seleccione una tienda asignada</option>
+                                {% else %}
+                                    <option value="">Seleccione primero un país</option>
+                                {% endif %}
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="almacen">TIENDA:</label>
-                            <select id="almacen" name="almacen" required disabled>
-                                <option value="">Seleccione primero un centro</option>
+                            <select id="almacen" name="almacen" required {% if not datos_tienda_usuario %}disabled{% else %}class="readonly-field locked-select"{% endif %}>
+                                {% if datos_tienda_usuario %}
+                                    <option value="{{ datos_tienda_usuario.mcu }}" selected>
+                                        {{ datos_tienda_usuario.mcu }}{% if datos_tienda_usuario.unidad_negocio %} - {{ datos_tienda_usuario.unidad_negocio }}{% endif %}
+                                    </option>
+                                {% elif tiendas_usuario|length > 1 %}
+                                    <option value="">Seleccione una tienda asignada</option>
+                                {% else %}
+                                    <option value="">Seleccione primero un centro</option>
+                                {% endif %}
                             </select>
                         </div>
                         <div class="form-group">
@@ -88,7 +108,7 @@
                         </div>
                         <div class="form-group" style="grid-column: 1 / span 2;">
                             <label for="centro_costo">CENTRO_COSTO:</label>
-                            <input type="text" id="centro_costo" name="centro_costo" readonly>
+                            <input type="text" id="centro_costo" name="centro_costo" value="{{ datos_tienda_usuario.ceco }}" readonly>
                         </div>
                     </div>
                 </div>
@@ -166,6 +186,16 @@
         </div>
     </div>
 </div>
+
+{% if tiendas_usuario|length > 1 %}
+<div id="modalSeleccionTienda" class="store-modal" aria-modal="true" role="dialog">
+    <div class="store-modal-content">
+        <h3>Seleccione la tienda</h3>
+        <div id="listaTiendasAsignadas" class="store-options"></div>
+    </div>
+</div>
+{% endif %}
+
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
@@ -240,6 +270,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const selectAlmacen = document.getElementById('almacen');
     const selectResponsable = document.getElementById('responsable');
     const inputCentroCosto = document.getElementById('centro_costo');
+    const tiendaDesdeLogin = JSON.parse('{{ datos_tienda_usuario_json|escapejs }}');
+    const tiendasAsignadas = JSON.parse('{{ tiendas_usuario_json|escapejs }}');
+    const usarTiendaDesdeLogin = Boolean(tiendaDesdeLogin && tiendaDesdeLogin.mcu);
+    const usarTiendasAsignadas = Array.isArray(tiendasAsignadas) && tiendasAsignadas.length > 0;
+    const requiereSeleccionTienda = usarTiendasAsignadas && tiendasAsignadas.length > 1 && !usarTiendaDesdeLogin;
     
     // Elementos para la funcionalidad de artículos
     const btnAgregarArticulo = document.getElementById('btnAgregarArticulo');
@@ -279,7 +314,77 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Variable para almacenar los datos de los almacenes
-    let datosAlmacenes = [];
+    let datosAlmacenes = usarTiendasAsignadas ? tiendasAsignadas.map(tienda => ({
+        mcu: tienda.mcu,
+        nombre_tienda: tienda.unidad_negocio || tienda.centro || '',
+        ceco: tienda.ceco || ''
+    })) : [];
+
+    function textoTienda(tienda) {
+        return [
+            tienda.mcu,
+            tienda.unidad_negocio || tienda.centro,
+            tienda.ceco
+        ].filter(Boolean).join(' - ');
+    }
+
+    function bloquearSelectTienda(select) {
+        select.disabled = false;
+        select.classList.add('readonly-field', 'locked-select');
+    }
+
+    function reemplazarOpciones(select, valor, texto) {
+        select.innerHTML = '';
+        const option = document.createElement('option');
+        option.value = valor || '';
+        option.textContent = texto || '';
+        option.selected = true;
+        select.appendChild(option);
+    }
+
+    function aplicarTiendaSeleccionada(tienda) {
+        if (!tienda || !tienda.mcu) return;
+
+        reemplazarOpciones(selectPais, tienda.pais || '', tienda.pais || '');
+        reemplazarOpciones(selectCentro, tienda.centro || '', tienda.centro || '');
+        reemplazarOpciones(selectAlmacen, tienda.mcu || '', textoTienda(tienda));
+        inputCentroCosto.value = tienda.ceco || '';
+
+        bloquearSelectTienda(selectPais);
+        bloquearSelectTienda(selectCentro);
+        bloquearSelectTienda(selectAlmacen);
+
+        selectResponsable.disabled = false;
+        cargarResponsables(tienda.mcu);
+    }
+
+    function mostrarModalSeleccionTienda() {
+        const modal = document.getElementById('modalSeleccionTienda');
+        const lista = document.getElementById('listaTiendasAsignadas');
+        if (!modal || !lista) return;
+
+        lista.innerHTML = '';
+        tiendasAsignadas.forEach(tienda => {
+            const boton = document.createElement('button');
+            boton.type = 'button';
+            boton.className = 'store-option';
+            const principal = document.createElement('span');
+            principal.className = 'store-option-main';
+            principal.textContent = tienda.mcu || '';
+            const detalle = document.createElement('span');
+            detalle.className = 'store-option-meta';
+            detalle.textContent = [tienda.centro, tienda.ceco].filter(Boolean).join(' · ');
+            boton.appendChild(principal);
+            boton.appendChild(detalle);
+            boton.addEventListener('click', function() {
+                aplicarTiendaSeleccionada(tienda);
+                modal.classList.remove('is-open');
+            });
+            lista.appendChild(boton);
+        });
+
+        modal.classList.add('is-open');
+    }
     
     // Variable para contar los artículos agregados
     let contadorArticulos = 0;
@@ -862,6 +967,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Event listener para cambio de país
     if (selectPais) {
         selectPais.addEventListener('change', function() {
+            if (usarTiendasAsignadas) return;
             console.log('País seleccionado:', this.value);
             if (this.value) {
                 selectCentro.disabled = false;
@@ -890,6 +996,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Event listener para cambio de centro
     if (selectCentro) {
         selectCentro.addEventListener('change', function() {
+            if (usarTiendasAsignadas) return;
             console.log('Centro seleccionado:', this.value);
             if (this.value) {
                 selectAlmacen.disabled = false;
@@ -912,6 +1019,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Event listener para cambio de almacén
     if (selectAlmacen) {
         selectAlmacen.addEventListener('change', function() {
+            if (usarTiendasAsignadas) return;
             console.log('Almacén seleccionado:', this.value);
             if (this.value) {
                 selectResponsable.disabled = false;
@@ -927,7 +1035,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Iniciar carga de países
-    cargarPaises();
+    if (usarTiendaDesdeLogin) {
+        console.log('Tienda cargada desde login/webservice:', tiendaDesdeLogin);
+        aplicarTiendaSeleccionada(tiendaDesdeLogin);
+    } else if (requiereSeleccionTienda) {
+        console.log('Tiendas asignadas disponibles para seleccion:', tiendasAsignadas);
+        mostrarModalSeleccionTienda();
+    } else {
+        cargarPaises();
+    }
 
     console.log('Event listeners configurados');
 
@@ -1219,6 +1335,74 @@ document.addEventListener('DOMContentLoaded', function() {
     border: 1px solid #e9ecef;
     color: #6c757d;
     cursor: not-allowed;
+}
+
+.locked-select {
+    pointer-events: none;
+}
+
+.store-modal {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(17, 24, 39, 0.58);
+    z-index: 3000;
+}
+
+.store-modal.is-open {
+    display: flex;
+}
+
+.store-modal-content {
+    width: min(520px, 100%);
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 22px 55px rgba(0, 0, 0, 0.22);
+    padding: 18px;
+}
+
+.store-modal-content h3 {
+    margin: 0 0 14px;
+    color: #052F62;
+    font-size: 16px;
+}
+
+.store-options {
+    display: grid;
+    gap: 10px;
+}
+
+.store-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #d7dee8;
+    border-radius: 6px;
+    background: #f8fafc;
+    cursor: pointer;
+    text-align: left;
+}
+
+.store-option:hover {
+    border-color: #052F62;
+    background: #eef4fb;
+}
+
+.store-option-main {
+    color: #052F62;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.store-option-meta {
+    margin-top: 4px;
+    color: #4b5563;
+    font-size: 12px;
 }
 
 .form-group input:focus,

@@ -210,8 +210,16 @@
                 Guardar Conteo
             </button>
         </div>
-    </form>
+	    </form>
+	</div>
+{% if tiendas_jefe|length > 1 %}
+<div id="modalSeleccionTiendaJefe" class="store-modal" aria-modal="true" role="dialog">
+    <div class="store-modal-content">
+        <h3>Seleccione la tienda</h3>
+        <div id="listaTiendasJefe" class="store-options"></div>
+    </div>
 </div>
+{% endif %}
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
@@ -278,6 +286,13 @@ $(document).ready(function() {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM cargado - Formulario de nuevo conteo jefe');
 
+    const inputPais = document.getElementById('pais');
+    const inputCentro = document.getElementById('centro');
+    const inputAlmacen = document.getElementById('almacen');
+    const inputCentroCosto = document.getElementById('centro_costo');
+    const tiendasJefe = JSON.parse('{{ tiendas_jefe_json|escapejs }}');
+    const datosJefe = JSON.parse('{{ datos_jefe_json|escapejs }}');
+
     // Elementos para la funcionalidad de artículos
     const btnAgregarArticulo = document.getElementById('btnAgregarArticulo');
     const tablaArticulos = document.getElementById('tablaArticulos').getElementsByTagName('tbody')[0];
@@ -312,6 +327,61 @@ document.addEventListener('DOMContentLoaded', function() {
         inputLinea.disabled = true;
         inputMarca.disabled = true;
     }
+
+    function textoTienda(tienda) {
+        return [
+            tienda.mcu,
+            tienda.unidad_negocio || tienda.centro,
+            tienda.ceco
+        ].filter(Boolean).join(' - ');
+    }
+
+    function aplicarTiendaJefe(tienda) {
+        if (!tienda || !tienda.mcu) return;
+        inputPais.value = tienda.pais || '';
+        inputCentro.value = tienda.centro || '';
+        inputAlmacen.value = tienda.mcu || '';
+        inputAlmacen.title = textoTienda(tienda);
+        inputCentroCosto.value = tienda.ceco || '';
+    }
+
+    function mostrarModalSeleccionTiendaJefe() {
+        const modal = document.getElementById('modalSeleccionTiendaJefe');
+        const lista = document.getElementById('listaTiendasJefe');
+        if (!modal || !lista) return;
+
+        lista.innerHTML = '';
+        tiendasJefe.forEach(tienda => {
+            const boton = document.createElement('button');
+            boton.type = 'button';
+            boton.className = 'store-option';
+
+            const principal = document.createElement('span');
+            principal.className = 'store-option-main';
+            principal.textContent = tienda.mcu || '';
+
+            const detalle = document.createElement('span');
+            detalle.className = 'store-option-meta';
+            detalle.textContent = [tienda.centro, tienda.ceco].filter(Boolean).join(' · ');
+
+            boton.appendChild(principal);
+            boton.appendChild(detalle);
+            boton.addEventListener('click', function() {
+                aplicarTiendaJefe(tienda);
+                modal.classList.remove('is-open');
+            });
+            lista.appendChild(boton);
+        });
+
+        modal.classList.add('is-open');
+    }
+
+    if (Array.isArray(tiendasJefe) && tiendasJefe.length > 1 && !(datosJefe && datosJefe.mcu)) {
+        mostrarModalSeleccionTiendaJefe();
+    } else if (datosJefe && datosJefe.mcu) {
+        aplicarTiendaJefe(datosJefe);
+    }
+
     // Variable para contar los artículos agregados
     let contadorArticulos = 0;
 
@@ -661,6 +731,70 @@ document.addEventListener('DOMContentLoaded', function() {
     border: 1px solid #e9ecef;
     color: #6c757d;
     cursor: not-allowed;
+}
+
+.store-modal {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(17, 24, 39, 0.58);
+    z-index: 3000;
+}
+
+.store-modal.is-open {
+    display: flex;
+}
+
+.store-modal-content {
+    width: min(520px, 100%);
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 22px 55px rgba(0, 0, 0, 0.22);
+    padding: 18px;
+}
+
+.store-modal-content h3 {
+    margin: 0 0 14px;
+    color: #052F62;
+    font-size: 16px;
+}
+
+.store-options {
+    display: grid;
+    gap: 10px;
+}
+
+.store-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #d7dee8;
+    border-radius: 6px;
+    background: #f8fafc;
+    cursor: pointer;
+    text-align: left;
+}
+
+.store-option:hover {
+    border-color: #052F62;
+    background: #eef4fb;
+}
+
+.store-option-main {
+    color: #052F62;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.store-option-meta {
+    margin-top: 4px;
+    color: #4b5563;
+    font-size: 12px;
 }
 
 .form-group input:focus,

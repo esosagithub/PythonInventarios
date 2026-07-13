@@ -1515,9 +1515,57 @@ def nuevo_conteo(request):
         messages.error(request, 'No tiene permisos para crear nuevos conteos')
         return redirect('administracion_conteo')
 
+    usuario_sesion = request.session.get('usuario', {})
+    cedula_usuario = str(usuario_sesion.get('cedula', '') or '').strip()
+    datos_tienda_usuario = {}
+    tiendas_usuario = []
+
+    tiendas_sesion = _normalizar_tiendas(
+        usuario_sesion.get('tiendas_asignadas', [])
+    )
+    if tiendas_sesion:
+        tiendas_usuario = tiendas_sesion
+        print(
+            "[NUEVO_CONTEO] Tiendas recuperadas desde sesion: "
+            f"{tiendas_usuario!r}"
+        )
+    elif cedula_usuario:
+        try:
+            tiendas = _consultar_tiendas_colaborador(cedula_usuario)
+            if not tiendas:
+                tiendas = _consultar_tienda_desde_colaborador(usuario_sesion)
+
+            if tiendas:
+                tiendas_usuario = tiendas
+                usuario_sesion['tiendas_asignadas'] = tiendas
+                request.session['usuario'] = usuario_sesion
+                print(
+                    "[NUEVO_CONTEO] Tiendas recuperadas desde webservice: "
+                    f"{tiendas_usuario!r}"
+                )
+        except Exception as e:
+            print(
+                "[NUEVO_CONTEO] Error al obtener tienda desde webservice "
+                f"para {cedula_usuario!r}: {e}"
+            )
+
+    if len(tiendas_usuario) == 1:
+        datos_tienda_usuario = dict(tiendas_usuario[0])
+        usuario_sesion['tienda_codigo'] = datos_tienda_usuario.get('mcu', '')
+        usuario_sesion['mcu'] = datos_tienda_usuario.get('mcu', '')
+        usuario_sesion['almacen'] = datos_tienda_usuario.get('mcu', '')
+        usuario_sesion['centro'] = datos_tienda_usuario.get('centro', '')
+        usuario_sesion['centro_costo'] = datos_tienda_usuario.get('ceco', '')
+        usuario_sesion['pais'] = datos_tienda_usuario.get('pais', '')
+        request.session['usuario'] = usuario_sesion
+
     context = {
         'usuario': request.session['usuario'],
         'perfil': perfil_nombre,
+        'datos_tienda_usuario': datos_tienda_usuario,
+        'datos_tienda_usuario_json': json.dumps(datos_tienda_usuario),
+        'tiendas_usuario': tiendas_usuario,
+        'tiendas_usuario_json': json.dumps(tiendas_usuario),
     }
 
     return render(request, 'inventario/nuevo_conteo.html', context)
@@ -1561,6 +1609,7 @@ def nuevo_conteo_jefe(request):
 
     # OBTENER DATOS DEL JEFE DEL WEB SERVICE
     datos_jefe = {}
+    tiendas_jefe = []
     usuario_sesion = request.session.get('usuario', {})
     cedula_jefe = str(usuario_sesion.get('cedula', '') or '').strip()
     if cedula_jefe and usuario_sesion.get('cedula') != cedula_jefe:
@@ -1574,46 +1623,32 @@ def nuevo_conteo_jefe(request):
         usuario_sesion.get('tiendas_asignadas', [])
     )
     if tiendas_sesion:
-        datos_jefe = dict(tiendas_sesion[0])
-        datos_jefe.update({
-            'cedula': cedula_jefe,
-            'nomina_nom': usuario_sesion.get('nombre', ''),
-            'nomina_ape': '',
-        })
+        tiendas_jefe = tiendas_sesion
         print(
             "[NUEVO_CONTEO_JEFE] Datos recuperados desde sesion: "
-            f"{datos_jefe!r}"
+            f"{tiendas_jefe!r}"
         )
     elif cedula_jefe:
         try:
             tiendas = _consultar_tiendas_colaborador(cedula_jefe)
             if tiendas:
-                datos_jefe = dict(tiendas[0])
-                datos_jefe.update({
-                    'cedula': cedula_jefe,
-                    'nomina_nom': usuario_sesion.get('nombre', ''),
-                    'nomina_ape': '',
-                })
+                tiendas_jefe = tiendas
+                usuario_sesion['tiendas_asignadas'] = tiendas_jefe
+                request.session['usuario'] = usuario_sesion
                 print(
-                    f"✅ [NUEVO_CONTEO_JEFE] Datos del jefe encontrados: {datos_jefe}")
+                    f"✅ [NUEVO_CONTEO_JEFE] Tiendas del jefe encontradas: {tiendas_jefe}")
 
                 # DEBUG: Imprimir todas las claves disponibles
-                print("🔑 [NUEVO_CONTEO_JEFE] Claves disponibles en datos_jefe:")
-                for key, value in datos_jefe.items():
-                    print(f"   {key}: {value}")
+                print("🔑 [NUEVO_CONTEO_JEFE] Tiendas disponibles:")
+                for tienda in tiendas_jefe:
+                    print(f"   {tienda}")
             else:
                 tiendas_fallback = _consultar_tienda_desde_colaborador(
                     usuario_sesion
                 )
                 if tiendas_fallback:
-                    datos_jefe = dict(tiendas_fallback[0])
+                    tiendas_jefe = tiendas_fallback
                     usuario_sesion['tiendas_asignadas'] = tiendas_fallback
-                    usuario_sesion['tienda_codigo'] = datos_jefe.get('mcu', '')
-                    usuario_sesion['mcu'] = datos_jefe.get('mcu', '')
-                    usuario_sesion['almacen'] = datos_jefe.get('mcu', '')
-                    usuario_sesion['centro'] = datos_jefe.get('centro', '')
-                    usuario_sesion['centro_costo'] = datos_jefe.get('ceco', '')
-                    usuario_sesion['pais'] = datos_jefe.get('pais', '')
                     request.session['usuario'] = usuario_sesion
                 else:
                     print(
@@ -1629,11 +1664,30 @@ def nuevo_conteo_jefe(request):
     else:
         print("❌ [NUEVO_CONTEO_JEFE] No se encontró cédula en la sesión")
 
+    if len(tiendas_jefe) == 1:
+        datos_jefe = dict(tiendas_jefe[0])
+        usuario_sesion['tienda_codigo'] = datos_jefe.get('mcu', '')
+        usuario_sesion['mcu'] = datos_jefe.get('mcu', '')
+        usuario_sesion['almacen'] = datos_jefe.get('mcu', '')
+        usuario_sesion['centro'] = datos_jefe.get('centro', '')
+        usuario_sesion['centro_costo'] = datos_jefe.get('ceco', '')
+        usuario_sesion['pais'] = datos_jefe.get('pais', '')
+        request.session['usuario'] = usuario_sesion
+
+    datos_jefe.update({
+        'cedula': cedula_jefe,
+        'nomina_nom': usuario_sesion.get('nombre', ''),
+        'nomina_ape': '',
+    })
+
     context = {
         'usuario': request.session['usuario'],
         'perfil': perfil_nombre,
         'datos_jefe': datos_jefe,
-        'cedula_jefe': cedula_jefe
+        'cedula_jefe': cedula_jefe,
+        'tiendas_jefe': tiendas_jefe,
+        'tiendas_jefe_json': json.dumps(tiendas_jefe),
+        'datos_jefe_json': json.dumps(datos_jefe),
     }
 
     return render(request, 'inventario/nuevo_conteo_jefe.html', context)
