@@ -19,7 +19,7 @@ from django.db import connection
 import oracledb
 import oracledb as cx_Oracle
 import os
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import time
 import unicodedata
@@ -97,6 +97,94 @@ def _parse_numero_formateado(valor, default=0, entero=False):
         return default
 
     return int(numero) if entero else float(numero)
+
+
+def _calcular_diferencias_acta_preliminar(cursor, numero_conteo):
+    cursor.execute("""
+        SELECT
+            NVL(SUM(CASE
+                WHEN estado_comparacion_3 = 'FALTANTE' THEN DIFERENCIA_4
+                ELSE 0
+            END), 0) AS cantidad_items_faltantes,
+            ABS(NVL(SUM(CASE
+                WHEN estado_comparacion_3 = 'SOBRANTE' THEN DIFERENCIA_4
+                ELSE 0
+            END), 0)) AS cantidad_items_sobrantes,
+            ABS(NVL(SUM(CASE
+                WHEN estado_comparacion_3 = 'FALTANTE' THEN DIFERENCIA_4 * PVP
+                ELSE 0
+            END), 0)) AS valor_items_faltantes,
+            NVL(SUM(CASE
+                WHEN estado_comparacion_3 = 'SOBRANTE' THEN DIFERENCIA_4 * PVP
+                ELSE 0
+            END), 0) AS valor_items_sobrantes
+        FROM INV_INVENTARIO_FISICO_VS_SISTEMA
+        WHERE numero_conteo = %s
+    """, [numero_conteo])
+
+    row = cursor.fetchone() or (0, 0, 0, 0)
+    cantidad_faltantes = row[0] or 0
+    cantidad_sobrantes = row[1] or 0
+
+    return {
+        'cantidad_items_faltantes': cantidad_faltantes,
+        'cantidad_items_sobrantes': cantidad_sobrantes,
+        'valor_items_faltantes': float(row[2] or 0),
+        'valor_items_sobrantes': float(row[3] or 0),
+        'lineas_diferencias': int(cantidad_faltantes) + int(cantidad_sobrantes),
+    }
+
+
+def _parse_fecha_bd(valor, include_time=True):
+    if valor in (None, ''):
+        return None
+
+    if isinstance(valor, datetime):
+        return valor if include_time else valor.date()
+
+    if isinstance(valor, date):
+        if include_time:
+            return datetime.combine(valor, datetime.min.time())
+        return valor
+
+    texto = str(valor).strip()
+    if not texto or texto.lower() in {'none', 'null'}:
+        return None
+
+    texto = texto.replace('T', ' ')
+    if texto.startswith('0000-00-00') or texto.startswith('00/00/0000'):
+        return None
+
+    if include_time:
+        formatos = [
+            '%Y-%m-%d %H:%M:%S',
+            '%Y-%m-%d %H:%M',
+            '%Y-%m-%d',
+            '%d/%m/%Y %H:%M:%S',
+            '%d/%m/%Y %H:%M',
+            '%d/%m/%Y',
+        ]
+    else:
+        formatos = [
+            '%Y-%m-%d',
+            '%Y-%m-%d %H:%M:%S',
+            '%Y-%m-%d %H:%M',
+            '%d/%m/%Y',
+            '%d/%m/%Y %H:%M:%S',
+            '%d/%m/%Y %H:%M',
+        ]
+
+    texto_base = texto[:19]
+    for formato in formatos:
+        candidato = texto_base[:len(datetime.now().strftime(formato))]
+        try:
+            fecha = datetime.strptime(candidato, formato)
+            return fecha if include_time else fecha.date()
+        except ValueError:
+            continue
+
+    print(f"⚠️ Fecha inválida omitida para acta: {valor!r}")
+    return None
 
 
 def _perfil_nombre(request):
@@ -1014,6 +1102,7 @@ def administracion_conteo(request):
 
     # CONSULTA REAL A LA BASE DE DATOS
     conteos_reales = []
+    nuevo_conteo_bloqueado = False
     estadisticas = {
         'total': 0,
         'pendientes': 0,
@@ -1024,6 +1113,16 @@ def administracion_conteo(request):
 
     try:
         with connection.cursor() as cursor:
+            # Evaluar todos los registros, sin depender de los filtros visuales.
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM view_planificacion_inventario pi
+                WHERE UPPER(TRIM(NVL(pi.estado, '__SIN_ESTADO__'))) IN (
+                    'EN_PROCESO', 'PRIMER_CONTEO', 'SEGUNDO_CONTEO', 'PENDIENTE'
+                )
+            """)
+            nuevo_conteo_bloqueado = cursor.fetchone()[0] > 0
+
             # Consulta base con filtros dinámicos
             base_query = """
                 SELECT 
@@ -1135,7 +1234,8 @@ def administracion_conteo(request):
         return JsonResponse({
             'conteos': conteos_reales,
             'estadisticas': estadisticas,
-            'filtros_aplicados': filtros
+            'filtros_aplicados': filtros,
+            'nuevo_conteo_bloqueado': nuevo_conteo_bloqueado
         })
 
     # OBTENER OPCIONES PARA LOS FILTROS
@@ -1162,7 +1262,8 @@ def administracion_conteo(request):
         'estadisticas': estadisticas,
         'centros_disponibles': centros_disponibles,
         'almacenes_disponibles': almacenes_disponibles,
-        'filtros_actuales': filtros
+        'filtros_actuales': filtros,
+        'nuevo_conteo_bloqueado': nuevo_conteo_bloqueado
     }
 
     return render(request, 'inventario/administracion_conteo.html', context)
@@ -1292,6 +1393,7 @@ def administracion_conteo_jefe(request):
 
     # CONSULTA ESPECIAL PARA JEFE - FILTRADO POR CENTROS/ALMACENES ASIGNADOS
     conteos_reales = []
+    nuevo_conteo_bloqueado = False
     estadisticas = {
         'total': 0,
         'pendientes': 0,
@@ -1328,6 +1430,17 @@ def administracion_conteo_jefe(request):
             filtro_tienda, params_tienda = _filtro_conteos_usuario(
                 request, 'pi'
             )
+            # Evaluar todos los conteos asignados al jefe, sin filtros visuales.
+            cursor.execute(f"""
+                SELECT COUNT(*)
+                FROM view_planificacion_inventario pi
+                WHERE {filtro_tienda}
+                  AND UPPER(TRIM(NVL(pi.estado, '__SIN_ESTADO__'))) IN (
+                      'EN_PROCESO', 'PRIMER_CONTEO', 'SEGUNDO_CONTEO', 'PENDIENTE'
+                  )
+            """, params_tienda)
+            nuevo_conteo_bloqueado = cursor.fetchone()[0] > 0
+
             base_query += f" AND {filtro_tienda}"
             params.extend(params_tienda)
             # APLICAR FILTROS ADICIONALES DINÁMICAMENTE
@@ -1421,7 +1534,8 @@ def administracion_conteo_jefe(request):
             'estadisticas': estadisticas,
             'filtros_aplicados': filtros,
             'centros_asignados': centros_asignados,
-            'almacenes_asignados': almacenes_asignados
+            'almacenes_asignados': almacenes_asignados,
+            'nuevo_conteo_bloqueado': nuevo_conteo_bloqueado
         })
 
     # OBTENER OPCIONES PARA LOS FILTROS (solo los centros/almacenes asignados al jefe)
@@ -1438,7 +1552,8 @@ def administracion_conteo_jefe(request):
         'filtros_actuales': filtros,
         'datos_tienda_jefe': datos_tienda_jefe,
         'centros_asignados': centros_asignados,
-        'almacenes_asignados': almacenes_asignados
+        'almacenes_asignados': almacenes_asignados,
+        'nuevo_conteo_bloqueado': nuevo_conteo_bloqueado
     }
 
     return render(request, 'inventario/administracion_conteo_jefe.html', context)
@@ -6430,14 +6545,14 @@ def imprimir_acta_preliminar_pdf(request, piqueo_id):
         y_items -= info_h
         
         items_data = [
-            ("Cantidad MARCAS:", datos['cantidad_marcas'] or 31, False),
-            ("Cantidad LÍNEAS:", datos['cantidad_lineas'] or 35, False),
-            ("Cantidad ITEMS:", datos['cantidad_items'] or 16253, False),
-            ("Cantidad Items faltantes:", datos['cantidad_items_faltantes'] or -218, False),
-            ("Cantidad Items sobrantes:", datos['cantidad_items_sobrantes'] or 40, False),
-            ("Valor Items faltantes:", f"-${abs(datos['valor_items_faltantes'] or 6376):,.2f}", False),
-            ("Valor Items sobrantes:", f"${datos['valor_items_sobrantes'] or 1114:,.2f}", False),
-            ("Código de inventario:", datos['codigo_inventario'] or '25519MQN1TO', False),
+            ("Cantidad MARCAS:", datos['cantidad_marcas'] or 0, False),
+            ("Cantidad LÍNEAS:", datos['cantidad_lineas'] or 0, False),
+            ("Cantidad ITEMS:", datos['cantidad_items'] or 0, False),
+            ("Cantidad Items faltantes:", datos['cantidad_items_faltantes'] or 0, False),
+            ("Cantidad Items sobrantes:", datos['cantidad_items_sobrantes'] or 0, False),
+            ("Valor Items faltantes:", f"-${abs(datos['valor_items_faltantes'] or 0):,.2f}", False),
+            ("Valor Items sobrantes:", f"${datos['valor_items_sobrantes'] or 0:,.2f}", False),
+            ("Código de inventario:", datos['codigo_inventario'] or '', False),
             ("Líneas de diferencias:", datos['lineas_diferencias'] or '', False)
         ]
         
@@ -7902,59 +8017,13 @@ def formulario_acta_preliminar(request, piqueo_id):
             datos_conteo['cantidad_toma_revisada'] = toma_revisada[0] if toma_revisada and toma_revisada[0] else 0
             print(f"✅ Cantidad Toma Revisada: {datos_conteo['cantidad_toma_revisada']}")
             
-            # 13. Obtener cantidad de items faltantes (usar campo DIFERENCIA_4 y estado_comparacion_3)
-            cursor.execute("""
-                SELECT sum(DIFERENCIA_4) as cantidad_items_faltantes
-                FROM inv_inventario_fisico_vs_sistema a
-                WHERE numero_conteo = %s
-                AND estado_comparacion_3 = 'FALTANTE'
-            """, [numero_conteo])
-
-            items_faltantes = cursor.fetchone()
-            datos_conteo['cantidad_items_faltantes'] = items_faltantes[0] if items_faltantes and items_faltantes[0] else 0
+            # 13-16. Diferencias según doc/acta_preliminar_mapeo.html.
+            diferencias_acta = _calcular_diferencias_acta_preliminar(cursor, numero_conteo)
+            datos_conteo.update(diferencias_acta)
             print(f"✅ Cantidad Items Faltantes: {datos_conteo['cantidad_items_faltantes']}")
-            
-            # 14. Obtener cantidad de items sobrantes (usar campo DIFERENCIA_4 y estado_comparacion_3)
-            cursor.execute("""
-                SELECT ABS(sum(DIFERENCIA_4)) as cantidad_items_sobrantes
-                FROM inv_inventario_fisico_vs_sistema a
-                WHERE numero_conteo = %s
-                AND estado_comparacion_3 = 'SOBRANTE'
-            """, [numero_conteo])
-
-            items_sobrantes = cursor.fetchone()
-            datos_conteo['cantidad_items_sobrantes'] = items_sobrantes[0] if items_sobrantes and items_sobrantes[0] else 0
             print(f"✅ Cantidad Items Sobrantes: {datos_conteo['cantidad_items_sobrantes']}")
-
-            # Calcular líneas de diferencias = cantidad faltantes + cantidad sobrantes
-            datos_conteo['lineas_diferencias'] = (
-                int(datos_conteo.get('cantidad_items_faltantes', 0)) +
-                int(datos_conteo.get('cantidad_items_sobrantes', 0))
-            )
             print(f"✅ Líneas de Diferencias: {datos_conteo['lineas_diferencias']}")
-            
-            # 15. Obtener valor de items faltantes
-            cursor.execute("""
-                SELECT sum(diferencia_4*pvp) as valor_items_faltantes
-                FROM inv_inventario_fisico_vs_sistema a
-                WHERE numero_conteo = %s
-                AND estado_comparacion_3='FALTANTE'
-            """, [numero_conteo])
-            
-            valor_faltantes = cursor.fetchone()
-            datos_conteo['valor_items_faltantes'] = abs(float(valor_faltantes[0])) if valor_faltantes and valor_faltantes[0] else 0.00
             print(f"✅ Valor Items Faltantes: ${datos_conteo['valor_items_faltantes']:.2f}")
-            
-            # 16. Obtener valor de items sobrantes
-            cursor.execute("""
-                SELECT sum(diferencia_4*pvp) as valor_items_sobrantes
-                FROM inv_inventario_fisico_vs_sistema a
-                WHERE numero_conteo = %s
-                AND estado_comparacion_3='SOBRANTE'
-            """, [numero_conteo])
-            
-            valor_sobrantes = cursor.fetchone()
-            datos_conteo['valor_items_sobrantes'] = float(valor_sobrantes[0]) if valor_sobrantes and valor_sobrantes[0] else 0.00
             print(f"✅ Valor Items Sobrantes: ${datos_conteo['valor_items_sobrantes']:.2f}")
             
             # 17. Asignar código de inventario (es el mismo numero_conteo)
@@ -8463,24 +8532,10 @@ def guardar_acta_preliminar(request):
             stock_sap_valor_otros = parse_int_value('stock_sap_valor_5', 0)
             stock_sap_total = parse_int_value('stock_sap_total', 0)
             
-            # Formatear fechas para Oracle
-            def format_date_oracle(fecha_str, include_time=True):
-                if not fecha_str:
-                    return None
-                # Reemplazar T por espacio si viene en formato ISO
-                fecha_str = fecha_str.replace('T', ' ')
-                # Si solo tiene fecha sin hora, agregar 00:00:00
-                if include_time and len(fecha_str) == 10:
-                    fecha_str += ' 00:00:00'
-                # Si tiene hora pero sin segundos (HH:MM), agregar :00
-                if include_time and len(fecha_str) == 16:
-                    fecha_str += ':00'
-                return fecha_str
-            
-            fecha_primer_conteo_fmt = format_date_oracle(fecha_primer_conteo)
-            fecha_segundo_conteo_fmt = format_date_oracle(fecha_segundo_conteo)
-            hora_genero_informe_fmt = format_date_oracle(hora_genero_informe)
-            fecha_toma_anterior_fmt = format_date_oracle(fecha_toma_anterior, include_time=False)
+            fecha_primer_conteo_fmt = _parse_fecha_bd(fecha_primer_conteo)
+            fecha_segundo_conteo_fmt = _parse_fecha_bd(fecha_segundo_conteo)
+            hora_genero_informe_fmt = _parse_fecha_bd(hora_genero_informe)
+            fecha_toma_anterior_fmt = _parse_fecha_bd(fecha_toma_anterior, include_time=False)
             
             sql = """
                 INSERT INTO acta_preliminar_tbl (
@@ -8519,7 +8574,7 @@ def guardar_acta_preliminar(request):
                     CARGO_8, NOMBRE_CARGO_8
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s,
-                    %s, TO_DATE(%s, 'YYYY-MM-DD HH24:MI:SS'), TO_DATE(%s, 'YYYY-MM-DD HH24:MI:SS'),
+                    %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s, %s,
@@ -8533,9 +8588,9 @@ def guardar_acta_preliminar(request):
                     %s, %s, %s,
                     %s, %s,
                     %s, %s,
-                    %s, %s, TO_DATE(%s, 'YYYY-MM-DD HH24:MI:SS'),
+                    %s, %s, %s,
                     %s, %s,
-                    TO_DATE(%s, 'YYYY-MM-DD'), %s,
+                    %s, %s,
                     %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s,
@@ -8642,6 +8697,16 @@ def guardar_acta_preliminar(request):
             except Exception:
                 pass
 
+            diferencias_acta = _calcular_diferencias_acta_preliminar(cursor, numero_conteo_val)
+            print(
+                "🔔 Diferencias recalculadas para INSERT: "
+                f"faltantes={diferencias_acta['cantidad_items_faltantes']}, "
+                f"sobrantes={diferencias_acta['cantidad_items_sobrantes']}, "
+                f"valor_faltantes={diferencias_acta['valor_items_faltantes']}, "
+                f"valor_sobrantes={diferencias_acta['valor_items_sobrantes']}, "
+                f"lineas={diferencias_acta['lineas_diferencias']}"
+            )
+
             # Preparar parámetros
             print(f"🔔 Valores Stock antes de INSERT: calzado=({stock_sap_descripcion_calzado},{stock_sap_valor_calzado}), ropa=({stock_sap_descripcion_ropa},{stock_sap_valor_ropa}), accesorio=({stock_sap_descripcion_accesorio},{stock_sap_valor_accesorio}), fundas=({stock_sap_descripcion_fundas},{stock_sap_valor_fundas}), otros=({stock_sap_descripcion_otros},{stock_sap_valor_otros}), total={stock_sap_total}")
             params = [
@@ -8674,12 +8739,12 @@ def guardar_acta_preliminar(request):
                 get_number('cantidad_marcas', 0, entero=True),
                 get_number('cantidad_lineas', 0, entero=True),
                 get_number('cantidad_items', 0, entero=True),
-                get_number('cantidad_items_faltantes', 0, entero=True),
-                get_number('cantidad_items_sobrantes', 0, entero=True),
-                get_number('valor_items_faltantes', 0),
-                get_number('valor_items_sobrantes', 0),
+                diferencias_acta['cantidad_items_faltantes'],
+                diferencias_acta['cantidad_items_sobrantes'],
+                diferencias_acta['valor_items_faltantes'],
+                diferencias_acta['valor_items_sobrantes'],
                 get_value('codigo_inventario'),
-                get_number('lineas_diferencias', 0, entero=True),
+                diferencias_acta['lineas_diferencias'],
                 hora_genero_informe_fmt,
                 get_value('toma_fisica_grupo'),
                 get_value('confirmo_encerado_guia_remi'),
@@ -8723,7 +8788,13 @@ def guardar_acta_preliminar(request):
                 get_value('auditor_interno_cargo', '').upper(),
                 get_value('auditor_interno_firma', '').upper()
             ]
-            
+
+            cursor.execute("""
+                DELETE FROM acta_preliminar_tbl
+                WHERE piqueo_id = %s OR numero_conteo = %s
+            """, [piqueo_id_val, numero_conteo_val])
+            print(f"🧹 Actas preliminares previas eliminadas: {cursor.rowcount}")
+
             cursor.execute(sql, params)
 
             # Guardar PAIS si se obtuvo desde JDE o payload (UPDATE posterior al INSERT)
