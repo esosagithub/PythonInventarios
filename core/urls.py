@@ -12,6 +12,7 @@ urlpatterns = [
     path('administracion-conteo/', views.administracion_conteo, name='administracion_conteo'),
     path('administracion-conteo-jefe/', views.administracion_conteo_jefe, name='administracion_conteo_jefe'),
     path('administracion-conteo/filtrar/', views.administracion_conteo, name='filtrar_conteos'),
+    path('reversos/', views.reversos, name='reversos'),
     path('conteo/<int:piqueo_id>/detalle/', views.detalle_conteo, name='detalle_conteo'), 
     path('seleccionar-perfil/', views.seleccionar_perfil, name='seleccionar_perfil'), 
     path('nuevo-conteo/', views.nuevo_conteo, name='nuevo_conteo'),

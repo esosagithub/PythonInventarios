@@ -79,7 +79,7 @@ Nota: SAP_HCM_MCU se consulta desde JDE, pero no se guarda como columna independ
 SELECT MAX(fecha) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE NUMERO_CONTEO = %s</code></td></tr>
       <tr><td>FECHA_SEGUNDO_CONTEO</td><td>ACTA_PRELIMINAR_TBL</td><td>Inventario físico</td><td><code>SELECT DISTINCT MAX(fecha_conteo_2) FROM INV_INVENTARIO_FISICO_VS_SISTEMA WHERE NUMERO_CONTEO = %s</code></td></tr>
       <tr><td>JEFE_TIENDA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE 'JEFE%%' AND piqueo_id = %s</code></td></tr>
-      <tr><td>SUBJEFE_TIENDA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE 'SUB JEFE%%' AND piqueo_id = %s</code></td></tr>
+      <tr><td>SUBJEFE_TIENDA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE 'SUBJEFE%%' AND piqueo_id = %s</code></td></tr>
       <tr><td>AUXILIAR_VENTAS</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE '%%VENTAS%%' AND piqueo_id = %s</code></td></tr>
       <tr><td>AUXILIAR_CAJA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE '%%CAJ%%' AND piqueo_id = %s</code></td></tr>
       <tr><td>AUXILIAR_BODEGA</td><td>ACTA_PRELIMINAR_TBL</td><td>Colaboradores</td><td><code>SELECT COUNT(*) FROM INV_PIQUEO_COLABORADORES_TBL WHERE cargo LIKE '%%BODEGA%%' AND piqueo_id = %s</code></td></tr>

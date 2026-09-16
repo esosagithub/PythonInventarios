@@ -194,6 +194,78 @@ def _perfil_nombre(request):
     return str(perfil or '')
 
 
+ESTADOS_REVERSABLES = {
+    'PRIMER_CONTEO': 'EN_PROCESO',
+    'SEGUNDO_CONTEO': 'PRIMER_CONTEO',
+    'ACTA_PRELIMINAR': 'SEGUNDO_CONTEO',
+}
+
+
+def reversos(request):
+    """Consulta y revierte un conteo un paso dentro del flujo operativo."""
+    if 'usuario' not in request.session:
+        return redirect('login')
+    if _perfil_nombre(request) != 'ADMINISTRATIVO':
+        messages.error(request, 'No tiene permisos para acceder a Reversos.')
+        return redirect('dashboard')
+
+    numero_conteo = (request.POST.get('numero_conteo', '') if request.method == 'POST'
+                      else request.GET.get('numero_conteo', '')).strip()
+    conteo = None
+
+    if request.method == 'POST' and request.POST.get('accion') == 'reversar':
+        if not numero_conteo:
+            messages.error(request, 'Ingrese el número de conteo para reversar.')
+        else:
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT piqueo_id, numero_conteo, estado
+                    FROM INV_PIQUEOS_INVENTARIO_TBL
+                    WHERE numero_conteo = %s FOR UPDATE
+                """, [numero_conteo])
+                row = cursor.fetchone()
+                if not row:
+                    messages.error(request, 'No se encontró el número de conteo indicado.')
+                else:
+                    estado_actual = (row[2] or '').strip().upper()
+                    estado_anterior = ESTADOS_REVERSABLES.get(estado_actual)
+                    if not estado_anterior:
+                        messages.error(request, 'El conteo está en estado {} y no puede reversarse. Solo se permiten PRIMER_CONTEO, SEGUNDO_CONTEO y ACTA_PRELIMINAR.'.format(estado_actual or 'SIN ESTADO'))
+                    else:
+                        cursor.execute("""
+                            UPDATE INV_PIQUEOS_INVENTARIO_TBL SET estado = %s
+                            WHERE piqueo_id = %s AND UPPER(TRIM(estado)) = %s
+                        """, [estado_anterior, row[0], estado_actual])
+                        if cursor.rowcount != 1:
+                            messages.error(request, 'No fue posible reversar el conteo porque su estado cambió. Consúltelo nuevamente.')
+                        else:
+                            messages.success(request, 'Conteo {} reversado de {} a {}.'.format(row[1], estado_actual, estado_anterior))
+
+    if numero_conteo:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT piqueo_id, numero_conteo, estado, fecha_inicio, fecha_fin, centro, almacen
+                FROM INV_PIQUEOS_INVENTARIO_TBL WHERE numero_conteo = %s
+            """, [numero_conteo])
+            row = cursor.fetchone()
+        if row:
+            estado = (row[2] or '').strip().upper()
+            conteo = {
+                'piqueo_id': row[0], 'numero_conteo': row[1],
+                'estado': estado or 'SIN ESTADO', 'fecha_inicio': row[3],
+                'fecha_fin': row[4], 'centro': row[5], 'almacen': row[6],
+                'puede_reversar': estado in ESTADOS_REVERSABLES,
+                'estado_anterior': ESTADOS_REVERSABLES.get(estado),
+            }
+        elif request.method == 'GET':
+            messages.error(request, 'No se encontró el número de conteo indicado.')
+
+    return render(request, 'inventario/reversos.html', {
+        'usuario': request.session['usuario'], 'perfil': _perfil_nombre(request),
+        'conteo': conteo, 'numero_conteo': numero_conteo,
+    })
+
+
 def _normalizar_tiendas(datos):
     tiendas = []
     if not isinstance(datos, list):
@@ -7909,7 +7981,7 @@ def formulario_acta_preliminar(request, piqueo_id):
             cursor.execute("""
                 SELECT COUNT(*) AS subjefe_tienda 
                 FROM INV_PIQUEO_COLABORADORES_TBL 
-                WHERE cargo LIKE 'SUB JEFE%%' 
+                WHERE cargo LIKE 'SUBJEFE%%'
                 AND piqueo_id = %s
             """, [piqueo_id])
             
