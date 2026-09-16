@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Monitor del servidor de inventarios</title>
+    <style>
+        :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+        body { margin: 0; background: #0f172a; color: #e2e8f0; }
+        main { width: min(1100px, calc(100% - 32px)); margin: 32px auto; }
+        h1 { margin-bottom: 6px; }
+        .subtitulo { color: #94a3b8; margin-top: 0; }
+        .monitores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 26px; }
+        .monitor { background: #172033; border: 1px solid #334155; border-radius: 16px; padding: 20px; min-width: 0; }
+        .monitor h2 { margin: 0 0 4px; }
+        .monitor-descripcion { margin: 0; color: #94a3b8; font-size: 14px; }
+        .estado { display: flex; align-items: center; gap: 14px; margin: 18px 0; padding: 16px; border-radius: 12px; background: #1e293b; border: 1px solid #334155; }
+        .indicador { width: 22px; height: 22px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 18px currentColor; }
+        .ok .indicador { background: #22c55e; color: #22c55e; }
+        .error .indicador { background: #ef4444; color: #ef4444; }
+        .lento .indicador { background: #f59e0b; color: #f59e0b; }
+        .estado h3 { margin: 0; }
+        .estado p { margin: 3px 0 0; color: #cbd5e1; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+        .tarjeta { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 18px; }
+        .etiqueta { color: #94a3b8; font-size: 13px; }
+        .valor { margin-top: 8px; font-size: 22px; font-weight: 700; word-break: break-word; }
+        .historial { margin-top: 22px; background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 18px; }
+        .historial h3 { margin-top: 0; }
+        #eventos { font-family: ui-monospace, monospace; font-size: 13px; max-height: 240px; overflow: auto; }
+        .evento { padding: 7px 0; border-bottom: 1px solid #334155; }
+        .nota { color: #94a3b8; font-size: 13px; margin-top: 20px; }
+        @media (max-width: 760px) {
+            main { margin: 20px auto; }
+            .monitores { grid-template-columns: 1fr; }
+            .grid { grid-template-columns: 1fr 1fr; }
+            .valor { font-size: 18px; }
+        }
+        @media (max-width: 430px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Monitor del servidor</h1>
+    <p class="subtitulo">Comprobacion automatica cada 5 segundos</p>
+
+    <section class="monitores">
+        <article class="monitor">
+            <h2>Python / Django</h2>
+            <p class="monitor-descripcion">Waitress, aplicacion web y conexion Oracle</p>
+            <div id="estadoPython" class="estado lento">
+                <span class="indicador"></span>
+                <div><h3 id="pythonTitulo">Comprobando...</h3><p id="pythonDetalle">Esperando la primera respuesta.</p></div>
+            </div>
+            <div class="grid">
+                <div class="tarjeta"><div class="etiqueta">Waitress / Django</div><div id="servidor" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">Oracle</div><div id="database" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">Respuesta total</div><div id="latencia" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">Tiempo activo</div><div id="uptime" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">PID / hilos</div><div id="proceso" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">Ultima respuesta</div><div id="ultima" class="valor">--</div></div>
+            </div>
+        </article>
+
+        <article class="monitor">
+            <h2>PM2 / Node.js</h2>
+            <p class="monitor-descripcion">Proceso wsInventarios y servicio del puerto 3001</p>
+            <div id="estadoPm2" class="estado lento">
+                <span class="indicador"></span>
+                <div><h3 id="pm2Titulo">Comprobando...</h3><p id="pm2Detalle">Esperando el estado de PM2.</p></div>
+            </div>
+            <div class="grid">
+                <div class="tarjeta"><div class="etiqueta">Proceso PM2</div><div id="pm2" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">Servicio puerto 3001</div><div id="puerto3001" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">Tiempo activo PM2</div><div id="pm2Uptime" class="valor">--</div></div>
+                <div class="tarjeta"><div class="etiqueta">Reinicios PM2</div><div id="pm2Reinicios" class="valor">--</div></div>
+            </div>
+        </article>
+    </section>
+
+    <section class="historial"><h3>Eventos recientes</h3><div id="eventos"></div></section>
+    <p class="nota">Mantenga esta pagina abierta. Si el proceso se congela o se cae, el monitor conservara la pagina cargada y mostrara que dejo de recibir respuestas.</p>
+</main>
+<script>
+    const intervaloMs = 5000;
+    const timeoutMs = 8000;
+    const ultimosEstados = { python: null, pm2: null };
+
+    function duracion(segundos) {
+        const s = Number(segundos || 0);
+        const dias = Math.floor(s / 86400);
+        const horas = Math.floor((s % 86400) / 3600);
+        const minutos = Math.floor((s % 3600) / 60);
+        return `${dias ? dias + 'd ' : ''}${horas}h ${minutos}m`;
+    }
+
+    function evento(texto) {
+        const nodo = document.createElement('div');
+        nodo.className = 'evento';
+        nodo.textContent = `${new Date().toLocaleTimeString()} - ${texto}`;
+        const contenedor = document.getElementById('eventos');
+        contenedor.prepend(nodo);
+        while (contenedor.children.length > 30) contenedor.lastChild.remove();
+    }
+
+    function mostrarEstado(monitor, tipo, titulo, detalle) {
+        const prefijo = monitor === 'python' ? 'python' : 'pm2';
+        const estado = document.getElementById(monitor === 'python' ? 'estadoPython' : 'estadoPm2');
+        estado.className = `estado ${tipo}`;
+        document.getElementById(`${prefijo}Titulo`).textContent = titulo;
+        document.getElementById(`${prefijo}Detalle`).textContent = detalle;
+        if (ultimosEstados[monitor] !== tipo) evento(`${monitor.toUpperCase()} - ${titulo}: ${detalle}`);
+        ultimosEstados[monitor] = tipo;
+    }
+
+    async function comprobar() {
+        const inicio = performance.now();
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(`{% url 'health_check' %}?t=${Date.now()}`, {
+                cache: 'no-store', signal: controller.signal
+            });
+            const data = await response.json();
+            const redMs = Math.round(performance.now() - inicio);
+            document.getElementById('servidor').textContent = 'Activo';
+            document.getElementById('database').textContent = data.database ? `Activo (${data.database_ms} ms)` : 'Con error';
+            document.getElementById('pm2').textContent = data.pm2.online
+                ? `Online · PID ${data.pm2.pid} · ${data.pm2.restarts || 0} reinicios`
+                : `${data.pm2.status}${data.pm2.error ? ' · ' + data.pm2.error : ''}`;
+            document.getElementById('puerto3001').textContent = data.pm2.port_3001 ? 'Responde' : 'Sin respuesta';
+            document.getElementById('pm2Uptime').textContent = data.pm2.uptime_seconds == null ? '--' : duracion(data.pm2.uptime_seconds);
+            document.getElementById('pm2Reinicios').textContent = data.pm2.restarts == null ? '--' : data.pm2.restarts;
+            document.getElementById('latencia').textContent = `${redMs} ms`;
+            document.getElementById('uptime').textContent = duracion(data.uptime_seconds);
+            document.getElementById('proceso').textContent = `${data.process_id} / ${data.active_threads}`;
+            document.getElementById('ultima').textContent = new Date().toLocaleTimeString();
+
+            if (!data.database) {
+                mostrarEstado('python', 'error', 'Oracle no responde', data.database_error || 'Django esta activo, pero la base de datos fallo.');
+            } else if (redMs > 3000) {
+                mostrarEstado('python', 'lento', 'Python responde lento', `La comprobacion tardo ${redMs} ms.`);
+            } else {
+                mostrarEstado('python', 'ok', 'Python disponible', `Django y Oracle respondieron en ${redMs} ms.`);
+            }
+
+            if (!data.pm2.port_3001 || (data.pm2.available && !data.pm2.online)) {
+                const detallePm2 = data.pm2.error || `Estado PM2: ${data.pm2.status}; puerto 3001: ${data.pm2.port_3001 ? 'activo' : 'sin respuesta'}.`;
+                mostrarEstado('pm2', 'error', 'wsInventarios no disponible', detallePm2);
+            } else if (!data.pm2.available) {
+                mostrarEstado('pm2', 'lento', 'Servicio activo; PM2 no verificable', data.pm2.error || 'El puerto 3001 responde, pero PM2 no pudo consultarse.');
+            } else {
+                mostrarEstado('pm2', 'ok', 'PM2 disponible', `wsInventarios esta online y el puerto 3001 responde.`);
+            }
+        } catch (error) {
+            document.getElementById('servidor').textContent = 'Sin respuesta';
+            document.getElementById('database').textContent = 'No verificable';
+            document.getElementById('pm2').textContent = 'No verificable';
+            document.getElementById('puerto3001').textContent = 'No verificable';
+            document.getElementById('latencia').textContent = `>${timeoutMs} ms`;
+            mostrarEstado('python', 'error', 'Servidor Python no disponible', error.name === 'AbortError'
+                ? `No respondio antes de ${timeoutMs / 1000} segundos.`
+                : 'No se pudo conectar con Waitress.');
+            mostrarEstado('pm2', 'lento', 'PM2 no verificable', 'El monitor Python no respondio; no se pudo consultar PM2.');
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    comprobar();
+    setInterval(comprobar, intervaloMs);
+</script>
+</body>
+</html>

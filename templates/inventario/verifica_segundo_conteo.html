@@ -36,6 +36,23 @@
                         <span>Dashboard</span>
                     </a>
                 </li>
+                {% if solo_lectura %}
+                <li class="menu-item active">
+                    <a href="{% url 'administracion_conteo' %}">
+                        <span>Administración de Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'tercer_conteo' %}">
+                        <span>Tercer Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'acta_final' %}">
+                        <span>Acta Final</span>
+                    </a>
+                </li>
+                {% else %}
                 <li class="menu-item">
                     <a href="{% url 'administracion_conteo_jefe' %}">
                         <span>Administración de Conteo</span>
@@ -71,6 +88,7 @@
                         <span>Acta Preliminar</span>
                     </a>
                 </li>
+                {% endif %}
             </ul>
         </nav>
 
@@ -85,7 +103,7 @@
     <div class="main-content" id="mainContent">
         <div class="content-header">
             <h1>Verifica Segundo Conteo</h1>
-            <p>Revisión y edición de conteos en estado Segundo Conteo</p>
+            <p>{% if solo_lectura %}Consulta de conteos en estado Segundo Conteo{% else %}Revisión y edición de conteos en estado Segundo Conteo{% endif %}</p>
         </div>
 
         <!-- Estadísticas -->
@@ -423,6 +441,7 @@
     function renderizarFilaDetalle(item) {
         const detalleIndex = detalleData.indexOf(item);
         const estaEditando = detalleIndex === detalleEditingIndex;
+        const soloLectura = {{ solo_lectura|yesno:"true,false" }};
 
         if (estaEditando) {
             return `
@@ -440,7 +459,14 @@
                 <td>${escapeHtml(item.sap_4)}</td>
                 <td>${escapeHtml(item.diferencia_4)}</td>
                 <td>${escapeHtml(item.proceso_segundo_conteo)}</td>
-                <td>${escapeHtml(item.observaciones)}</td>
+                <td class="observacion-edit-cell">
+                    <div class="observacion-anterior">
+                        <strong>Observación anterior:</strong>
+                        <span>${escapeHtml(item.observaciones || '')}</span>
+                    </div>
+                    <textarea id="editObservacionNueva" class="inline-edit-input observacion-nueva-input"
+                              rows="3" placeholder="Agregar una nueva observación"></textarea>
+                </td>
                 <td>${escapeHtml(item.nombre_colaborador)}</td>
                 <td>${escapeHtml(item.ubicacion_4)}</td>
                 <td>${escapeHtml(item.codigo_sap)}</td>
@@ -456,8 +482,10 @@
         return `
             <td>
                 <div class="action-buttons">
-                    <button class="btn-icon" title="Editar" onclick="editarDetalle(${detalleIndex})">
-                        <i class="fas fa-pen"></i>
+                    <button class="btn-icon ${soloLectura ? 'btn-disabled' : ''}"
+                            title="${soloLectura ? 'Edición bloqueada para el administrador' : 'Editar'}"
+                            onclick="editarDetalle(${detalleIndex})" ${soloLectura ? 'disabled' : ''}>
+                        <i class="fas ${soloLectura ? 'fa-lock' : 'fa-pen'}"></i>
                     </button>
                 </div>
             </td>
@@ -534,6 +562,9 @@
     }
 
     function editarDetalle(detalleIndex) {
+        if ({{ solo_lectura|yesno:"true,false" }}) {
+            return;
+        }
         detalleEditingIndex = detalleIndex;
         renderizarDetallePagina();
     }
@@ -546,6 +577,12 @@
     function guardarEdicionDetalle(detalleIndex) {
         const item = detalleData[detalleIndex];
         const conteo4 = document.getElementById('editConteo4').value;
+        const observacionNueva = document.getElementById('editObservacionNueva').value.trim();
+
+        if (!observacionNueva) {
+            alert('Debe ingresar una observación antes de guardar.');
+            return;
+        }
 
         showLoading('Guardando detalle...');
 
@@ -561,7 +598,8 @@
                 codigo: item.codigo,
                 codigo_sap: item.codigo_sap,
                 ean: item.ean,
-                conteo_4: conteo4 === '' ? null : conteo4
+                conteo_4: conteo4 === '' ? null : conteo4,
+                observacion_nueva: observacionNueva
             })
         })
         .then(response => response.json())
@@ -822,6 +860,29 @@
 
     .inline-edit-observation {
         min-width: 180px;
+    }
+
+    .observacion-edit-cell {
+        min-width: 280px;
+    }
+
+    .observacion-anterior {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-bottom: 7px;
+        padding: 7px;
+        border-radius: 5px;
+        background: #eef2f6;
+        color: #374151;
+        font-size: 10px;
+    }
+
+    .observacion-nueva-input {
+        min-width: 260px;
+        height: auto;
+        min-height: 58px;
+        resize: vertical;
     }
 
     .pagination-footer {
@@ -1183,5 +1244,6 @@
     .auditoria-filter-row {
         margin-bottom: 12px;
     }
+
 </style>
 {% endblock %}

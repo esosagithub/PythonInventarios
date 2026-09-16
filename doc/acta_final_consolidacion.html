@@ -202,7 +202,7 @@ FROM acta_preliminar_tbl WHERE numero_conteo IN :conteos_sin_obs4
 SELECT SUM(CASE WHEN estado_comparacion_4='SOBRANTE'
                THEN NVL(diferencia_4,0)*NVL(pvp,0) ELSE 0 END)
 FROM inv_inventario_fisico_vs_sistema WHERE numero_conteo IN :conteos_con_obs4</code></td></tr>
-      <tr><td>LINEAS_DIFERENCIAS</td><td>ACTA_FINAL_TBL</td><td>Cálculo Python</td><td><code>CANTIDAD_ITEMS_FALTANTES + CANTIDAD_ITEMS_SOBRANTES</code></td></tr>
+      <tr><td>LINEAS_DIFERENCIAS</td><td>ACTA_FINAL_TBL</td><td>Inventario físico — todos los conteos consolidados</td><td><code>SELECT COUNT(CASE WHEN estado_comparacion_4='FALTANTE' THEN diferencia_4 END) + ABS(COUNT(CASE WHEN estado_comparacion_4='SOBRANTE' THEN diferencia_4 END)) FROM inv_inventario_fisico_vs_sistema WHERE numero_conteo IN :numeros_conteo</code></td></tr>
 
       <!-- Acumulados -->
       <tr><td>CANTIDAD_ITEM_ULTIMO_INV</td><td>ACTA_FINAL_TBL</td><td>FIJO — referencia histórica del inventario anterior (mismo valor en todos los conteos)</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN cantidad_item_ultimo_inv END)

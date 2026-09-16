@@ -99,8 +99,8 @@
                             <th>Fecha Fin</th>
                             <th>Responsable</th>
                             <th>Planifica</th>
+                            <th>Concepto</th>
                             <th>Centro</th>
-                            <th>Almacén</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
@@ -122,6 +122,24 @@
                             <td>{{ conteo.almacen }}</td>
                             <td>
                                 <div class="action-buttons">
+                                    <button class="btn-icon btn-stats" title="Ver estadísticas"
+                                        data-id="{{ conteo.id }}" onclick="mostrarEstadisticas(this.dataset.id)">
+                                        <i class="fas fa-chart-pie"></i>
+                                    </button>
+                                    <button class="btn-icon {% if conteo.estado|upper != 'SEGUNDO_CONTEO' %}btn-disabled{% else %}btn-success{% endif %}"
+                                        title="{% if conteo.estado|upper == 'SEGUNDO_CONTEO' %}Estadísticas por colaborador{% else %}Disponible únicamente en Segundo Conteo{% endif %}"
+                                        data-id="{{ conteo.id }}"
+                                        onclick="verEstadisticasColaboradores(this.dataset.id)"
+                                        {% if conteo.estado|upper != 'SEGUNDO_CONTEO' %}disabled{% endif %}>
+                                        <i class="fas fa-users"></i>
+                                    </button>
+                                    <button class="btn-icon {% if conteo.estado|upper != 'SEGUNDO_CONTEO' %}btn-disabled{% endif %}"
+                                        title="{% if conteo.estado|upper == 'SEGUNDO_CONTEO' %}Verificar segundo conteo{% else %}Disponible únicamente en Segundo Conteo{% endif %}"
+                                        data-id="{{ conteo.id }}"
+                                        onclick="abrirVerificacionSegundoConteo(this.dataset.id)"
+                                        {% if conteo.estado|upper != 'SEGUNDO_CONTEO' %}disabled{% endif %}>
+                                        <i class="fas fa-clipboard-check"></i>
+                                    </button>
                                     <button class="btn-icon" title="Ver detalle" onclick="verDetalle({{ conteo.id }})">
                                         <i class="fas fa-file-lines"></i>
                                     </button>
@@ -181,17 +199,19 @@
                         <label for="estado">Estado</label>
                         <select class="form-control" id="estado" name="estado">
                             <option value="">Todos los estados</option>
-                            <option value="PENDIENTE">Pendiente</option>
-                            <option value="ACTIVO">Activo</option>
-                            <option value="EN_PROCESO">En Proceso</option>
-                            <option value="COMPLETADO">Completado</option>
+                            {% for estado_disponible in estados_disponibles %}
+                            <option value="{{ estado_disponible }}"
+                                {% if filtros_actuales.estado == estado_disponible %}selected{% endif %}>
+                                {{ estado_disponible }}
+                            </option>
+                            {% endfor %}
                         </select>
                     </div>
 
                     <div class="form-group">
-                        <label for="centro">Centro</label>
+                        <label for="centro">Concepto</label>
                         <select class="form-control" id="centro" name="centro">
-                            <option value="">Todos los centros</option>
+                            <option value="">Todos los conceptos</option>
                             {% for centro in centros_disponibles %}
                             <option value="{{ centro }}">{{ centro }}</option>
                             {% endfor %}
@@ -199,9 +219,9 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="almacen">Almacén</label>
+                        <label for="almacen">Centro</label>
                         <select class="form-control" id="almacen" name="almacen">
-                            <option value="">Todos los almacenes</option>
+                            <option value="">Todos los centros</option>
                             {% for almacen in almacenes_disponibles %}
                             <option value="{{ almacen }}">{{ almacen }}</option>
                             {% endfor %}
@@ -227,6 +247,23 @@
                         <label for="fecha_fin_hasta">Fecha Fin (Hasta)</label>
                         <input type="date" class="form-control" id="fecha_fin_hasta" name="fecha_fin_hasta">
                     </div>
+
+                    <div class="form-group">
+                        <label for="ordenar_por">Ordenar por</label>
+                        <select class="form-control" id="ordenar_por" name="ordenar_por">
+                            <option value="fecha">Fecha de inicio</option>
+                            <option value="centro">Concepto</option>
+                            <option value="estado">Estado</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="direccion">Dirección</label>
+                        <select class="form-control" id="direccion" name="direccion">
+                            <option value="desc">Descendente</option>
+                            <option value="asc">Ascendente</option>
+                        </select>
+                    </div>
                 </div>
             </form>
         </div>
@@ -238,6 +275,79 @@
             <button type="button" class="btn btn-primary" onclick="applyFilters()">
                 Aplicar Filtros
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE ESTADISTICAS DEL CONTEO -->
+<div id="estadisticasModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h2>Estadísticas del Conteo</h2>
+            <button class="close" onclick="cerrarEstadisticas()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="estadisticasLoading" style="padding: 35px; text-align: center;">
+                Cargando estadísticas...
+            </div>
+            <div id="estadisticasContenido" style="display: none;">
+            <div class="info-grid">
+                <div class="info-item"><strong>Número:</strong> <span id="statNumero">-</span></div>
+                <div class="info-item"><strong>Estado:</strong> <span id="statEstado" class="status-badge">-</span></div>
+                <div class="info-item"><strong>Responsable:</strong> <span id="statResponsable">-</span></div>
+                <div class="info-item"><strong>Centro:</strong> <span id="statCentro">-</span></div>
+                <div class="info-item"><strong>Almacén:</strong> <span id="statAlmacen">-</span></div>
+                <div class="info-item"><strong>Fecha inicio:</strong> <span id="statFechaInicio">-</span></div>
+            </div>
+            <div class="admin-stats-grid">
+                <div class="admin-stat-card"><strong id="statTotalUbicaciones">0</strong><span>Total ubicaciones</span></div>
+                <div class="admin-stat-card"><strong id="statCerradas">0</strong><span>Ubicaciones cerradas</span></div>
+                <div class="admin-stat-card"><strong id="statPendientes">0</strong><span>Ubicaciones pendientes</span></div>
+                <div class="admin-stat-card"><strong id="statPorcentaje">0%</strong><span>Avance</span></div>
+                <div class="admin-stat-card"><strong id="statTotalEscaneado">0</strong><span>Productos escaneados</span></div>
+            </div>
+            <div class="admin-progress">
+                <div class="admin-progress-header"><span>Porcentaje de avance</span><strong id="statPorcentajeTexto">0%</strong></div>
+                <div class="admin-progress-track"><div id="statProgressBar" class="admin-progress-bar"></div></div>
+            </div>
+            <h3>Detalle del Piqueo</h3>
+            <div class="table-responsive admin-stats-table">
+                <table class="data-table">
+                    <thead><tr><th>Grupo Artículos</th><th>Ubicación</th><th>Secuencia</th><th>Código</th><th>Estado</th></tr></thead>
+                    <tbody id="statDetalleBody"><tr><td colspan="5" style="text-align:center">Cargando detalles...</td></tr></tbody>
+                </table>
+            </div>
+            <h3>Colaboradores - Productos Escaneados</h3>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead><tr><th>Cédula</th><th>Nombre</th><th>Productos escaneados</th></tr></thead>
+                    <tbody id="statColaboradoresBody"></tbody>
+                </table>
+            </div>
+            </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-outline" onclick="cerrarEstadisticas()">Cerrar</button></div>
+    </div>
+</div>
+
+<!-- MODAL DE VALIDACION PARA ELIMINAR -->
+<div id="eliminarPasswordModal" class="modal">
+    <div class="modal-content" style="max-width: 460px;">
+        <div class="modal-header">
+            <h2>Autorizar eliminación</h2>
+            <button class="close" onclick="cerrarPasswordEliminacion()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Ingrese la contraseña con la que inició sesión.</p>
+            <div class="form-group">
+                <label for="passwordEliminarConteo">Contraseña</label>
+                <input type="password" id="passwordEliminarConteo" class="form-control" autocomplete="current-password">
+            </div>
+            <p id="passwordEliminarError" style="display:none;color:#b42318;"></p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarPasswordEliminacion()">Cancelar</button>
+            <button id="btnValidarEliminar" class="btn btn-primary" onclick="validarPasswordYConfirmar()">Validar contraseña</button>
         </div>
     </div>
 </div>
@@ -461,6 +571,21 @@ function updateTable(conteos) {
             <td>${conteo.almacen}</td>
             <td>
                 <div class="action-buttons">
+                    <button class="btn-icon btn-stats" title="Ver estadísticas" onclick="mostrarEstadisticas(${conteo.id})">
+                        <i class="fas fa-chart-pie"></i>
+                    </button>
+                    <button class="btn-icon ${String(conteo.estado || '').toUpperCase() === 'SEGUNDO_CONTEO' ? 'btn-success' : 'btn-disabled'}"
+                        title="${String(conteo.estado || '').toUpperCase() === 'SEGUNDO_CONTEO' ? 'Estadísticas por colaborador' : 'Disponible únicamente en Segundo Conteo'}"
+                        onclick="verEstadisticasColaboradores(${conteo.id})"
+                        ${String(conteo.estado || '').toUpperCase() === 'SEGUNDO_CONTEO' ? '' : 'disabled'}>
+                        <i class="fas fa-users"></i>
+                    </button>
+                    <button class="btn-icon ${String(conteo.estado || '').toUpperCase() === 'SEGUNDO_CONTEO' ? '' : 'btn-disabled'}"
+                        title="${String(conteo.estado || '').toUpperCase() === 'SEGUNDO_CONTEO' ? 'Verificar segundo conteo' : 'Disponible únicamente en Segundo Conteo'}"
+                        onclick="abrirVerificacionSegundoConteo(${conteo.id})"
+                        ${String(conteo.estado || '').toUpperCase() === 'SEGUNDO_CONTEO' ? '' : 'disabled'}>
+                        <i class="fas fa-clipboard-check"></i>
+                    </button>
                     <button class="btn-icon" title="Ver detalle" onclick="verDetalle(${conteo.id})">
                         <i class="fas fa-file-lines"></i>
                     </button>
@@ -481,6 +606,102 @@ function updateStatistics(stats) {
     document.getElementById('completadosConteos').textContent = stats.completados;
 }
 
+function mostrarEstadisticas(piqueoId) {
+    const modal = document.getElementById('estadisticasModal');
+    document.getElementById('estadisticasLoading').style.display = 'block';
+    document.getElementById('estadisticasContenido').style.display = 'none';
+    document.getElementById('statDetalleBody').innerHTML = '<tr><td colspan="5" style="text-align:center">Cargando detalles...</td></tr>';
+    modal.classList.add('show');
+    fetch('{% url "obtener_estadisticas_conteo" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ piqueo_id: piqueoId })
+    })
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || data.error || 'No se pudieron cargar las estadísticas');
+        return data;
+    })
+    .then(data => {
+        const stats = data.estadisticas;
+        document.getElementById('statNumero').textContent = stats.numero_conteo || '-';
+        document.getElementById('statResponsable').textContent = stats.nm_responsable || '-';
+        document.getElementById('statCentro').textContent = stats.centro || '-';
+        document.getElementById('statAlmacen').textContent = stats.almacen || '-';
+        document.getElementById('statFechaInicio').textContent = stats.fecha_inicio || '-';
+        const estado = document.getElementById('statEstado');
+        estado.textContent = stats.estado || '-';
+        estado.className = `status-badge status-${String(stats.estado || '').toLowerCase()}`;
+        document.getElementById('statTotalUbicaciones').textContent = stats.total_ubicaciones || 0;
+        document.getElementById('statCerradas').textContent = stats.total_ubicaciones_cerradas || 0;
+        document.getElementById('statPendientes').textContent = stats.total_ubicaciones_pendientes || 0;
+        document.getElementById('statPorcentaje').textContent = `${stats.porcentaje_avance || 0}%`;
+        document.getElementById('statPorcentajeTexto').textContent = `${stats.porcentaje_avance || 0}%`;
+        const progressBar = document.getElementById('statProgressBar');
+        progressBar.style.width = `${Math.min(100, Number(stats.porcentaje_avance || 0))}%`;
+        progressBar.style.backgroundColor = stats.porcentaje_avance < 30
+            ? '#dc3545' : (stats.porcentaje_avance < 70 ? '#ffc107' : '#28a745');
+        document.getElementById('statTotalEscaneado').textContent = data.total_productos_escaneados || 0;
+        const body = document.getElementById('statColaboradoresBody');
+        body.innerHTML = data.colaboradores.length
+            ? data.colaboradores.map(c => `<tr><td>${c.cedula || '-'}</td><td>${c.nombres || '-'}</td><td>${c.cantidad_total || 0}</td></tr>`).join('')
+            : '<tr><td colspan="3" style="text-align:center">No hay colaboradores asignados</td></tr>';
+        document.getElementById('estadisticasLoading').style.display = 'none';
+        document.getElementById('estadisticasContenido').style.display = 'block';
+        cargarDetalleEstadisticas(piqueoId);
+    })
+    .catch(error => {
+        cerrarEstadisticas();
+        alert(`Error al cargar estadísticas: ${error.message}`);
+    });
+}
+
+function verEstadisticasColaboradores(piqueoId) {
+    window.location.href = `/diferencias-segundo-conteo/${encodeURIComponent(piqueoId)}/`;
+}
+
+function abrirVerificacionSegundoConteo(piqueoId) {
+    window.location.href = `{% url 'verifica_segundo_conteo' %}?piqueo_id=${encodeURIComponent(piqueoId)}`;
+}
+
+function cargarDetalleEstadisticas(piqueoId) {
+    fetch('{% url "obtener_detalle_piqueo_primer_conteo" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ piqueo_id: piqueoId })
+    })
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || data.error || 'No se pudo cargar el detalle');
+        return data;
+    })
+    .then(data => {
+        const body = document.getElementById('statDetalleBody');
+        body.innerHTML = data.detalles.length ? data.detalles.map(detalle => {
+            const validado = String(detalle.estado_validacion || '').toUpperCase() === 'VALIDADO';
+            const badge = validado
+                ? '<span class="status-badge status-completado">VALIDADO</span>'
+                : '<span class="status-badge status-error-detalle">ERROR</span>';
+            return `<tr><td>${detalle.grupo_articulos || ''}</td><td>${detalle.ubicacion || ''}</td><td>${detalle.secuencia || ''}</td><td>${detalle.codigo || ''}</td><td>${badge}</td></tr>`;
+        }).join('') : '<tr><td colspan="5" style="text-align:center">No hay detalles disponibles para este piqueo</td></tr>';
+    })
+    .catch(error => {
+        document.getElementById('statDetalleBody').innerHTML = `<tr><td colspan="5" style="text-align:center">Error: ${error.message}</td></tr>`;
+    });
+}
+
+function cerrarEstadisticas() {
+    document.getElementById('estadisticasModal').classList.remove('show');
+}
+
 function updateActiveFilters() {
     const activeFiltersDiv = document.getElementById('activeFilters');
     const filterTagsDiv = document.getElementById('filterTags');
@@ -496,12 +717,14 @@ function updateActiveFilters() {
     
     const filterLabels = {
         estado: 'Estado',
-        centro: 'Centro',
-        almacen: 'Almacén',
+        centro: 'Concepto',
+        almacen: 'Centro',
         fecha_inicio_desde: 'Fecha Inicio (Desde)',
         fecha_inicio_hasta: 'Fecha Inicio (Hasta)',
         fecha_fin_desde: 'Fecha Fin (Desde)',
-        fecha_fin_hasta: 'Fecha Fin (Hasta)'
+        fecha_fin_hasta: 'Fecha Fin (Hasta)',
+        ordenar_por: 'Ordenar por',
+        direccion: 'Dirección'
     };
 
     for (const [key, value] of Object.entries(currentFilters)) {
@@ -647,8 +870,58 @@ function getCookie(name) {
     return cookieValue;
 }
 
+let conteoPendienteEliminar = null;
+
 function eliminarConteo(id) {
-    if (confirm('¿Está seguro de eliminar este conteo?')) {
+    conteoPendienteEliminar = Number(id);
+    document.getElementById('passwordEliminarConteo').value = '';
+    document.getElementById('passwordEliminarError').style.display = 'none';
+    document.getElementById('eliminarPasswordModal').classList.add('show');
+    setTimeout(() => document.getElementById('passwordEliminarConteo').focus(), 50);
+}
+
+function cerrarPasswordEliminacion() {
+    document.getElementById('eliminarPasswordModal').classList.remove('show');
+    document.getElementById('passwordEliminarConteo').value = '';
+    conteoPendienteEliminar = null;
+}
+
+async function validarPasswordYConfirmar() {
+    const password = document.getElementById('passwordEliminarConteo').value;
+    const errorElement = document.getElementById('passwordEliminarError');
+    const boton = document.getElementById('btnValidarEliminar');
+    if (!password) {
+        errorElement.textContent = 'Ingrese su contraseña.';
+        errorElement.style.display = 'block';
+        return;
+    }
+    boton.disabled = true;
+    errorElement.style.display = 'none';
+    try {
+        const response = await fetch(`/conteo/${conteoPendienteEliminar}/validar-eliminacion/`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+            body: JSON.stringify({password})
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'No se pudo validar la contraseña');
+        const id = conteoPendienteEliminar;
+        document.getElementById('eliminarPasswordModal').classList.remove('show');
+        document.getElementById('passwordEliminarConteo').value = '';
+        if (confirm('¿Está seguro de eliminar este inventario? Esta acción no se puede deshacer.')) {
+            ejecutarEliminacionConteo(id);
+        } else {
+            conteoPendienteEliminar = null;
+        }
+    } catch (error) {
+        errorElement.textContent = error.message;
+        errorElement.style.display = 'block';
+    } finally {
+        boton.disabled = false;
+    }
+}
+
+function ejecutarEliminacionConteo(id) {
         fetch(`/conteo/${id}/eliminar/`, {
             method: 'POST',
             headers: {
@@ -669,7 +942,6 @@ function eliminarConteo(id) {
         .catch(error => {
             alert('Error al eliminar el conteo');
         });
-    }
 }
 
 // ========== EVENT LISTENERS ==========
@@ -1619,6 +1891,69 @@ document.addEventListener('keydown', function(event) {
 
 .h-100 {
     height: 100%;
+}
+
+.btn-stats {
+    color: #0d6efd;
+}
+
+.admin-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin: 22px 0;
+}
+
+.admin-stat-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 18px;
+    text-align: center;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    background: #f8f9fa;
+}
+
+.admin-stat-card strong {
+    font-size: 1.7rem;
+    color: #0d6efd;
+}
+
+.admin-stat-card span {
+    color: #495057;
+    font-size: .9rem;
+}
+
+.admin-progress {
+    margin: 20px 0 26px;
+}
+
+.admin-progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.admin-progress-track {
+    height: 18px;
+    overflow: hidden;
+    background: #e9ecef;
+    border-radius: 9px;
+}
+
+.admin-progress-bar {
+    width: 0;
+    height: 100%;
+    background: #28a745;
+    border-radius: 9px;
+    transition: width .35s ease;
+}
+
+.admin-stats-table {
+    max-height: 260px;
+    margin-bottom: 24px;
+    overflow: auto;
 }
 </style>
 

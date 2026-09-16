@@ -408,9 +408,13 @@ WHERE numero_conteo IN :conteos_con_obs4</code></td>
   <tr>
     <td class="col-campo">lineas_diferencias</td>
     <td class="col-regla"><span class="tag-calc">CALC</span></td>
-    <td class="col-fuente">Calculado</td>
-    <td><code>-- Se calcula en Python:
-lineas_diferencias = cantidad_items_faltantes + cantidad_items_sobrantes</code></td>
+    <td class="col-fuente">INV — todos los conteos consolidados</td>
+    <td><code>SELECT COUNT(CASE
+         WHEN estado_comparacion_4='FALTANTE' THEN diferencia_4 END)
+     + ABS(COUNT(CASE
+         WHEN estado_comparacion_4='SOBRANTE' THEN diferencia_4 END))
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :numeros_conteo</code></td>
   </tr>
 </table>
 

@@ -336,6 +336,7 @@
                             <tr>
                                 <th>ID Detalle</th>
                                 <th>Ubicación</th>
+                                <th>Desde</th>
                                 <th>Hasta</th>
                                 <th>Código</th>
                                 <th>Funciones</th>
@@ -678,18 +679,19 @@
         const tbody = document.getElementById('secuencialesTableBody');
         tbody.innerHTML = '';
         if (!secuenciales || secuenciales.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Sin secuenciales registrados</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">Sin secuenciales registrados</td></tr>`;
             return;
         }
 
-        // Ordenar los secuenciales de menor a mayor por secuencia_hasta
-        const secuencialesOrdenados = secuenciales.sort((a, b) => a.secuencia_hasta - b.secuencia_hasta);
+        // Ordenar los secuenciales de menor a mayor por secuencial_id
+        const secuencialesOrdenados = secuenciales.sort((a, b) => a.secuencial_id - b.secuencial_id);
 
         secuencialesOrdenados.forEach(sec => {
             const row = document.createElement('tr');
             row.innerHTML = `
             <td>${sec.detalle_piqueo_id}</td>
             <td>${sec.ubicacion}</td>
+            <td>${sec.secuencia_inicio}</td>
             <td>
                 <div class="input-container">
                     <span class="secuencia-valor">${sec.secuencia_hasta}</span>

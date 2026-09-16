@@ -164,6 +164,39 @@ class AlcanceTiendaTests(SimpleTestCase):
         self.assertEqual(filtro, '1=0')
         self.assertEqual(params, [])
 
+    @patch(
+        'inventario.views._consultar_tienda_desde_colaborador',
+        return_value=[]
+    )
+    @patch(
+        'inventario.views._consultar_tiendas_colaborador',
+        return_value=[]
+    )
+    def test_nuevo_conteo_bloquea_si_no_se_resuelve_ceco(
+        self,
+        consultar_tiendas,
+        consultar_fallback
+    ):
+        self.request.session['usuario'].update({
+            'nombre': 'JEFE PRUEBA',
+            'unidad_negocio': 'NIKE SAN MARINO',
+            'kostl': 'E1001ZNSA1',
+        })
+
+        with patch('builtins.print'):
+            response = views.nuevo_conteo_jefe(self.request)
+        contenido = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(
+            response,
+            'No se encuentra CECO en JDE-GENERAL/TIENDASXCOCENPTOXPAIS_VIEW.',
+            status_code=422
+        )
+        self.assertIn('/administracion-conteo-jefe/', contenido)
+        consultar_tiendas.assert_called_once_with('0912345678')
+        consultar_fallback.assert_called_once()
+
     def test_administrativo_conserva_filtro_de_listado_por_responsable(self):
         self.request.session['perfil_seleccionado'] = {
             'nombre': 'ADMINISTRATIVO'

@@ -77,6 +77,7 @@
                         <option value="">-- Seleccione --</option>
                         <option value="pendientes">Pendientes (Tercer Conteo)</option>
                         <option value="generadas">Actas Finales Generadas</option>
+                        <option value="preliminares">Actas Preliminares Generadas</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -155,6 +156,17 @@
             </div>
         </div>
 
+        <!-- Tabla: Actas Preliminares Generadas -->
+        <div class="card" id="actasPreliminaresContainer" style="display:none;">
+            <h2>Actas Preliminares Generadas</h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead><tr><th>Número del Conteo</th><th>Centro</th><th>Almacén</th><th>Estado</th><th>Fecha Inicio</th><th>Usuario</th><th>Acciones</th></tr></thead>
+                    <tbody id="actasPreliminaresTableBody"><tr><td colspan="7" class="empty-msg">Use el filtro para consultar actas preliminares.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Estado inicial: sin búsqueda -->
         <div class="card" id="initialState">
             <div style="text-align:center; padding: 40px 20px; color:#888;">
@@ -192,7 +204,9 @@
     function onTipoChange() {
         const tipo = document.getElementById('filtroTipo').value;
         const selAlmacen = document.getElementById('filtroAlmacen');
-        document.getElementById('btnGenerarActa').style.display = (tipo === 'pendientes') ? 'flex' : 'none';
+        const btnGenerar = document.getElementById('btnGenerarActa');
+        btnGenerar.style.display = (tipo === 'pendientes') ? 'flex' : 'none';
+        btnGenerar.disabled = tipo !== 'pendientes';
 
         selAlmacen.innerHTML = '<option value="">Cargando...</option>';
         selAlmacen.disabled = true;
@@ -233,6 +247,7 @@
         document.getElementById('btnGenerarActa').style.display = 'none';
         document.getElementById('actasGeneradasContainer').style.display = 'none';
         document.getElementById('conteosContainer').style.display = 'none';
+        document.getElementById('actasPreliminaresContainer').style.display = 'none';
         document.getElementById('initialState').style.display = 'block';
         document.getElementById('statTotal').textContent = '0';
         document.getElementById('statLabel').textContent = 'Resultados';
@@ -241,7 +256,7 @@
     function buscar() {
         const tipo = document.getElementById('filtroTipo').value;
         if (!tipo) {
-            alert('Seleccione un tipo de búsqueda (Pendientes o Actas Generadas).');
+            alert('Seleccione un tipo de búsqueda.');
             return;
         }
 
@@ -267,10 +282,18 @@
                 document.getElementById('statLabel').textContent = 'Actas Generadas';
                 document.getElementById('conteosContainer').style.display = 'none';
                 document.getElementById('actasGeneradasContainer').style.display = 'block';
+                document.getElementById('actasPreliminaresContainer').style.display = 'none';
                 renderActas(data.actas_finales);
+            } else if (data.tipo === 'preliminares') {
+                document.getElementById('statLabel').textContent = 'Actas Preliminares';
+                document.getElementById('conteosContainer').style.display = 'none';
+                document.getElementById('actasGeneradasContainer').style.display = 'none';
+                document.getElementById('actasPreliminaresContainer').style.display = 'block';
+                renderActasPreliminares(data.actas_preliminares);
             } else {
                 document.getElementById('statLabel').textContent = 'Conteos Pendientes';
                 document.getElementById('actasGeneradasContainer').style.display = 'none';
+                document.getElementById('actasPreliminaresContainer').style.display = 'none';
                 document.getElementById('conteosContainer').style.display = 'block';
                 renderConteos(data.conteos);
             }
@@ -280,6 +303,25 @@
             console.error(err);
             alert('Error al realizar la búsqueda.');
         });
+    }
+
+    function renderActasPreliminares(actas) {
+        const tbody = document.getElementById('actasPreliminaresTableBody');
+        if (!actas || actas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-msg">No se encontraron actas preliminares generadas.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = actas.map(a => `
+            <tr>
+                <td>${escapeHtml(a.numero_conteo)}</td>
+                <td>${escapeHtml(a.centro || '-')}</td>
+                <td>${escapeHtml(a.almacen || '-')}</td>
+                <td><span class="status-badge">${escapeHtml(a.estado)}</span></td>
+                <td>${escapeHtml(a.fecha_inicio)}</td>
+                <td>${escapeHtml(a.usuario_creacion || '-')}</td>
+                <td><button class="btn btn-primary btn-icon" title="Imprimir" onclick="imprimirActaPreliminar(${a.piqueo_id})"><i class="fas fa-print"></i></button></td>
+            </tr>
+        `).join('');
     }
 
     function renderActas(actas) {
@@ -379,6 +421,12 @@
     function imprimirActaFinal(actaFinalId) {
         showLoading('Generando PDF...');
         window.open('/imprimir-acta-final/' + actaFinalId + '/', '_blank');
+        setTimeout(hideLoading, 1500);
+    }
+
+    function imprimirActaPreliminar(piqueoId) {
+        showLoading('Generando PDF...');
+        window.open('/imprimir-acta-preliminar/' + piqueoId + '/', '_blank');
         setTimeout(hideLoading, 1500);
     }
 
