@@ -11,6 +11,7 @@ urlpatterns = [
     path('health/', views.health_check, name='health_check'),
     path('acta_preliminar_mapeo.html', views.acta_preliminar_mapeo_html, name='acta_preliminar_mapeo_html'),
     path('acta_final_consolidacion.html', views.acta_final_consolidacion_html, name='acta_final_consolidacion_html'),
+    path('actas_finales_tienda.html', views.actas_finales_tienda_html, name='actas_finales_tienda_html'),
     path('administracion-conteo/', views.administracion_conteo, name='administracion_conteo'),
     path('administracion-conteo-jefe/', views.administracion_conteo_jefe, name='administracion_conteo_jefe'),
     path('administracion-conteo/filtrar/', views.administracion_conteo, name='filtrar_conteos'),
@@ -87,6 +88,12 @@ urlpatterns = [
     path('guardar-acta-final/', views.guardar_acta_final, name='guardar_acta_final'),
     path('eliminar-acta-final/<int:acta_final_id>/', views.eliminar_acta_final, name='eliminar_acta_final'),
     path('imprimir-acta-final/<int:acta_final_id>/', views.imprimir_acta_final_pdf, name='imprimir_acta_final_pdf'),
+
+    # Actas finales de tienda (jefe)
+    path('actas-finales-tienda/', views.actas_finales_tienda, name='actas_finales_tienda'),
+    path('actas-finales-tienda/<int:acta_final_id>/descargar/', views.descargar_acta_final_tienda, name='descargar_acta_final_tienda'),
+    path('actas-finales-tienda/<int:acta_final_id>/subir/', views.subir_documento_acta_final, name='subir_documento_acta_final'),
+    path('actas-finales-tienda/documento/<int:documento_id>/', views.ver_documento_acta_final, name='ver_documento_acta_final'),
 
     # Acta Preliminar
     path('acta-preliminar/', views.acta_preliminar, name='acta_preliminar'),

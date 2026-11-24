@@ -161,6 +161,24 @@ Get-Content logs\django_error.log -Wait -Tail 50
 
 ## 🔄 Actualización de la Aplicación
 
+### Preparar Actas Finales de Tienda
+
+Antes de habilitar el módulo para los jefes de tienda:
+
+1. Ejecutar en Oracle `sql/crear_tablas_documentos_acta_final.sql`.
+2. Crear la carpeta protegida donde se guardarán los documentos, por ejemplo `D:\ActasFinales`.
+3. Dar permisos de lectura y escritura sobre esa carpeta a la cuenta que ejecuta el servicio NSSM.
+4. Configurar en `.env`:
+   ```env
+   ACTAS_FINALES_DOCUMENTOS_DIR=D:\ActasFinales
+   ```
+5. Incluir la carpeta en la política de respaldos del servidor.
+6. Recolectar los archivos estáticos:
+   ```powershell
+   $env:DJANGO_SETTINGS_MODULE = "core.settings_prod"
+   python manage.py collectstatic --noinput
+   ```
+
 1. **Detener el servicio:**
    ```powershell
    nssm stop DjangoInventarios

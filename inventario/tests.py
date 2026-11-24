@@ -1,9 +1,17 @@
 import json
+import hashlib
+import os
+import tempfile
+from contextlib import nullcontext
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
-from django.test import RequestFactory, SimpleTestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.http import HttpResponse
+from django.template.loader import render_to_string
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import reverse
 
 from inventario import views
@@ -394,6 +402,554 @@ def _llamada_sql(cursor, texto):
     if not llamadas:
         raise AssertionError(f'No se ejecutó ninguna consulta con {texto!r}')
     return llamadas[-1]
+
+
+class ActasFinalesTiendaTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.usuario = {
+            'cedula': '0912345678',
+            'nombre': 'JEFE PRUEBA',
+            'empresa': 'TIENDA PRUEBA',
+        }
+        self.acta_tienda = {
+            'acta_final_id': 61,
+            'centro': 'BDEPORTIVA',
+            'almacen': 'BSA1',
+        }
+
+    def _request(self, path='/', method='get', perfil='JEFE DE TIENDA', data=None):
+        request = getattr(self.factory, method)(path, data=data or {})
+        request.session = {
+            'usuario': dict(self.usuario),
+            'perfil_seleccionado': {'nombre': perfil},
+        }
+        return request
+
+    def _render(self, request, template_name, context):
+        response = HttpResponse(render_to_string(template_name, context, request=request))
+        response.context_data = context
+        return response
+
+    def _database(self, cursor):
+        database = MagicMock()
+        database.cursor.return_value = _cursor_context(cursor)
+        return database
+
+    def test_rutas_existen(self):
+        self.assertEqual(reverse('actas_finales_tienda'), '/actas-finales-tienda/')
+        self.assertEqual(
+            reverse('descargar_acta_final_tienda', args=[61]),
+            '/actas-finales-tienda/61/descargar/'
+        )
+        self.assertEqual(
+            reverse('subir_documento_acta_final', args=[61]),
+            '/actas-finales-tienda/61/subir/'
+        )
+        self.assertEqual(
+            reverse('ver_documento_acta_final', args=[9]),
+            '/actas-finales-tienda/documento/9/'
+        )
+
+    def test_perfil_no_jefe_no_puede_usar_el_modulo(self):
+        request = self._request(perfil='ADMINISTRATIVO')
+        with patch('inventario.views.messages'):
+            listado = views.actas_finales_tienda(request)
+        self.assertEqual(listado.status_code, 302)
+        self.assertEqual(listado.url, reverse('dashboard'))
+
+        self.assertEqual(
+            views.descargar_acta_final_tienda(request, 61).status_code, 403
+        )
+        self.assertEqual(
+            views.subir_documento_acta_final(request, 61).status_code, 403
+        )
+        self.assertEqual(
+            views.ver_documento_acta_final(request, 9).status_code, 403
+        )
+
+    def test_listado_aplica_filtro_y_arma_descargas_y_documentos(self):
+        cursor = MagicMock()
+        cursor.fetchall.side_effect = [
+            [(61, 'INV-61', 'C1,C2', datetime(2026, 11, 10, 12, 0), 'BDEPORTIVA', 'BSA1')],
+            [(61, 2, datetime(2026, 11, 11, 8, 0), datetime(2026, 11, 12, 9, 0))],
+            [(5, 61, 'DENUNCIA', 'denuncia.pdf', datetime(2026, 11, 12, 10, 0), 'JEFE PRUEBA')],
+        ]
+        request = self._request('/actas-finales-tienda/')
+
+        with patch(
+            'inventario.views._filtro_conteos_usuario',
+            return_value=('(p.centro = %s AND p.almacen = %s)', ['BDEPORTIVA', 'BSA1'])
+        ) as filtro, patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch('inventario.views.render', side_effect=self._render):
+            response = views.actas_finales_tienda(request)
+
+        filtro.assert_called_once_with(request, 'p')
+        acta = response.context_data['actas'][0]
+        self.assertEqual(acta['conteos'], ['C1', 'C2'])
+        self.assertEqual(acta['descargas']['cantidad'], 2)
+        self.assertEqual(acta['documentos']['DENUNCIA']['documento_id'], 5)
+        self.assertContains(response, '(obligatoria)')
+
+    def test_acta_ajena_no_se_descarga_ni_se_registra(self):
+        request = self._request('/actas-finales-tienda/61/descargar/')
+        cursor = MagicMock()
+        with patch(
+            'inventario.views._acta_final_de_tienda', return_value=None
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch('inventario.views.imprimir_acta_final_pdf') as imprimir:
+            response = views.descargar_acta_final_tienda(request, 61)
+
+        self.assertEqual(response.status_code, 404)
+        imprimir.assert_not_called()
+        cursor.execute.assert_not_called()
+
+    def test_descarga_correcta_inserta_auditoria(self):
+        request = self._request('/actas-finales-tienda/61/descargar/')
+        request.META['REMOTE_ADDR'] = '10.0.0.8'
+        cursor = MagicMock()
+        pdf = HttpResponse(b'%PDF-1.4', status=200, content_type='application/pdf')
+
+        with patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch(
+            'inventario.views.imprimir_acta_final_pdf', return_value=pdf
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch('inventario.views.transaction.atomic', return_value=nullcontext()):
+            response = views.descargar_acta_final_tienda(request, 61)
+
+        sql, params = _llamada_sql(cursor, 'insert into inv_acta_final_descarga_tbl')
+        self.assertIn('SYSTIMESTAMP', sql)
+        self.assertEqual(params[:4], [61, 'BDEPORTIVA', 'BSA1', '0912345678'])
+        self.assertEqual(params[-1], '10.0.0.8')
+        self.assertIn('attachment', response['Content-Disposition'])
+
+    def test_pdf_con_error_no_registra_descarga(self):
+        request = self._request('/actas-finales-tienda/61/descargar/')
+        cursor = MagicMock()
+        with patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch(
+            'inventario.views.imprimir_acta_final_pdf',
+            return_value=HttpResponse(status=404)
+        ), patch('inventario.views.connection', self._database(cursor)):
+            response = views.descargar_acta_final_tienda(request, 61)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(any(
+            'insert into inv_acta_final_descarga_tbl' in call.args[0].lower()
+            for call in cursor.execute.call_args_list
+        ))
+
+    def test_subidas_invalidas_no_escriben_archivo(self):
+        casos = [
+            ('extension', 'archivo.txt', b'%PDF-1.4'),
+            ('contenido', 'archivo.pdf', b'NO-ES-PDF'),
+            ('vacio', 'archivo.pdf', b''),
+        ]
+        for nombre, archivo_nombre, contenido in casos:
+            with self.subTest(nombre=nombre), tempfile.TemporaryDirectory() as carpeta, \
+                    override_settings(ACTAS_FINALES_DOCUMENTOS_DIR=carpeta):
+                archivo = SimpleUploadedFile(archivo_nombre, contenido)
+                request = self._request(
+                    '/actas-finales-tienda/61/subir/', 'post',
+                    data={'tipo_documento': 'DENUNCIA', 'archivo': archivo}
+                )
+                with patch(
+                    'inventario.views._acta_final_de_tienda',
+                    return_value=self.acta_tienda
+                ), patch(
+                    'inventario.views.connection', self._database(MagicMock())
+                ), patch('inventario.views.messages'):
+                    response = views.subir_documento_acta_final(request, 61)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(os.listdir(carpeta), [])
+
+    @override_settings(ACTAS_FINALES_DOCUMENTO_MAX_MB=0)
+    def test_rechaza_archivo_mayor_al_limite_y_tipo_invalido(self):
+        casos = [
+            ('tamano', 'DENUNCIA', 'El archivo no puede superar 0 MB.'),
+            ('tipo', 'OTRO', 'El tipo de documento no es válido.'),
+        ]
+        for nombre, tipo, mensaje_esperado in casos:
+            with self.subTest(nombre=nombre), tempfile.TemporaryDirectory() as carpeta, \
+                    override_settings(ACTAS_FINALES_DOCUMENTOS_DIR=carpeta):
+                request = self._request(
+                    '/actas-finales-tienda/61/subir/', 'post',
+                    data={
+                        'tipo_documento': tipo,
+                        'archivo': SimpleUploadedFile('archivo.pdf', b'%PDF-1.4'),
+                    }
+                )
+                cursor = MagicMock()
+                with patch(
+                    'inventario.views._acta_final_de_tienda',
+                    return_value=self.acta_tienda
+                ), patch(
+                    'inventario.views.connection', self._database(cursor)
+                ), patch('inventario.views.messages') as mensajes:
+                    response = views.subir_documento_acta_final(request, 61)
+
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(mensajes.error.call_args.args[1], mensaje_esperado)
+                self.assertEqual(list(Path(carpeta).rglob('*')), [])
+                self.assertFalse(any(
+                    'insert into inv_acta_final_documento_tbl' in call.args[0].lower()
+                    for call in cursor.execute.call_args_list
+                ))
+
+    def test_acta_firmada_exige_descarga_previa(self):
+        request = self._request(
+            '/actas-finales-tienda/61/subir/', 'post',
+            data={
+                'tipo_documento': 'ACTA_FIRMADA',
+                'archivo': SimpleUploadedFile('firmada.pdf', b'%PDF-1.4'),
+            }
+        )
+        cursor = MagicMock()
+        cursor.fetchone.return_value = (0,)
+        with patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch('inventario.views.messages') as mensajes:
+            response = views.subir_documento_acta_final(request, 61)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(
+            'Descargue el acta final', mensajes.error.call_args.args[1]
+        )
+
+    def test_acta_firmada_se_acepta_con_descarga_previa(self):
+        contenido = b'%PDF-1.4 acta firmada'
+        request = self._request(
+            '/actas-finales-tienda/61/subir/', 'post',
+            data={
+                'tipo_documento': 'ACTA_FIRMADA',
+                'archivo': SimpleUploadedFile('firmada.pdf', contenido),
+            }
+        )
+        cursor = MagicMock()
+        cursor.fetchone.side_effect = [(1,), (61,)]
+
+        with tempfile.TemporaryDirectory() as carpeta, override_settings(
+            ACTAS_FINALES_DOCUMENTOS_DIR=carpeta
+        ), patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch(
+            'inventario.views.transaction.atomic', return_value=nullcontext()
+        ), patch(
+            'inventario.views.timezone.localtime',
+            return_value=datetime(2026, 11, 24, 14, 30, 0)
+        ), patch('inventario.views.messages'):
+            response = views.subir_documento_acta_final(request, 61)
+            archivos = list(
+                Path(carpeta).glob('BSA1/61/ACTA_FIRMADA_20261124_143000_*.pdf')
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(archivos), 1)
+        sql, params = _llamada_sql(
+            cursor, 'insert into inv_acta_final_documento_tbl'
+        )
+        self.assertIn("'VIGENTE'", sql)
+        self.assertEqual(params[1], 'ACTA_FIRMADA')
+        self.assertEqual(params[4], len(contenido))
+
+    def test_denuncia_se_acepta_sin_descarga_y_guarda_hash(self):
+        contenido = b'%PDF-1.4 denuncia obligatoria'
+        request = self._request(
+            '/actas-finales-tienda/61/subir/', 'post',
+            data={
+                'tipo_documento': 'DENUNCIA',
+                'archivo': SimpleUploadedFile('denuncia.pdf', contenido),
+            }
+        )
+        cursor = MagicMock()
+        cursor.fetchone.return_value = (61,)
+
+        with tempfile.TemporaryDirectory() as carpeta, override_settings(
+            ACTAS_FINALES_DOCUMENTOS_DIR=carpeta
+        ), patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch(
+            'inventario.views.transaction.atomic', return_value=nullcontext()
+        ), patch('inventario.views.messages'):
+            response = views.subir_documento_acta_final(request, 61)
+            archivos = list(Path(carpeta).glob('BSA1/61/DENUNCIA_*.pdf'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(archivos), 1)
+        llamadas = cursor.execute.call_args_list
+        sqls = [call.args[0].lower() for call in llamadas]
+        self.assertFalse(any('inv_acta_final_descarga_tbl' in sql for sql in sqls))
+        indices = [
+            next(i for i, sql in enumerate(sqls) if texto in sql)
+            for texto in ('for update', 'set estado = \'reemplazado\'', 'insert into inv_acta_final_documento_tbl')
+        ]
+        self.assertEqual(indices, sorted(indices))
+        _, params = _llamada_sql(cursor, 'insert into inv_acta_final_documento_tbl')
+        self.assertEqual(params[4], len(contenido))
+        self.assertEqual(params[5], hashlib.sha256(contenido).hexdigest())
+
+    def test_si_falla_insert_elimina_archivo_nuevo(self):
+        request = self._request(
+            '/actas-finales-tienda/61/subir/', 'post',
+            data={
+                'tipo_documento': 'DENUNCIA',
+                'archivo': SimpleUploadedFile('denuncia.pdf', b'%PDF-1.4'),
+            }
+        )
+        cursor = MagicMock()
+        cursor.fetchone.return_value = (61,)
+
+        def ejecutar(sql, params=None):
+            if 'INSERT INTO INV_ACTA_FINAL_DOCUMENTO_TBL' in sql:
+                raise RuntimeError('fallo simulado')
+
+        cursor.execute.side_effect = ejecutar
+        with tempfile.TemporaryDirectory() as carpeta, override_settings(
+            ACTAS_FINALES_DOCUMENTOS_DIR=carpeta
+        ), patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch(
+            'inventario.views.transaction.atomic', return_value=nullcontext()
+        ), patch('inventario.views.messages'), patch('inventario.views.logger'):
+            response = views.subir_documento_acta_final(request, 61)
+            archivos = list(Path(carpeta).rglob('*.pdf'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(archivos, [])
+
+    def test_si_falla_escritura_elimina_parcial_y_no_hace_insert(self):
+        request = self._request(
+            '/actas-finales-tienda/61/subir/', 'post',
+            data={
+                'tipo_documento': 'DENUNCIA',
+                'archivo': SimpleUploadedFile('denuncia.pdf', b'%PDF-1.4'),
+            }
+        )
+        cursor = MagicMock()
+        abrir_real = open
+
+        class ArchivoQueFallaAlEscribir:
+            def __init__(self, ruta, modo):
+                self.ruta = ruta
+                self.modo = modo
+                self.archivo = None
+
+            def __enter__(self):
+                self.archivo = abrir_real(self.ruta, self.modo)
+                return self
+
+            def write(self, bloque):
+                self.archivo.write(bloque[:5])
+                self.archivo.flush()
+                raise OSError('fallo de escritura simulado')
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.archivo.close()
+
+        def abrir_archivo_que_falla(ruta, modo):
+            return ArchivoQueFallaAlEscribir(ruta, modo)
+
+        with tempfile.TemporaryDirectory() as carpeta, override_settings(
+            ACTAS_FINALES_DOCUMENTOS_DIR=carpeta
+        ), patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch(
+            'inventario.views.open', create=True,
+            side_effect=abrir_archivo_que_falla
+        ), patch('inventario.views.messages') as mensajes, patch(
+            'inventario.views.logger'
+        ):
+            response = views.subir_documento_acta_final(request, 61)
+            archivos = list(Path(carpeta).rglob('*.pdf'))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(archivos, [])
+        self.assertEqual(
+            mensajes.error.call_args.args[1],
+            'No se pudo guardar el archivo en el servidor.'
+        )
+        self.assertFalse(any(
+            'insert into inv_acta_final_documento_tbl' in call.args[0].lower()
+            for call in cursor.execute.call_args_list
+        ))
+
+    def test_file_exists_error_no_elimina_archivo_existente(self):
+        request = self._request(
+            '/actas-finales-tienda/61/subir/', 'post',
+            data={
+                'tipo_documento': 'DENUNCIA',
+                'archivo': SimpleUploadedFile('denuncia.pdf', b'%PDF-1.4 nueva'),
+            }
+        )
+        cursor = MagicMock()
+        contenido_existente = b'%PDF-1.4 documento existente'
+
+        with tempfile.TemporaryDirectory() as carpeta, override_settings(
+            ACTAS_FINALES_DOCUMENTOS_DIR=carpeta
+        ):
+            ruta_existente = (
+                Path(carpeta) / 'BSA1' / '61' /
+                'DENUNCIA_20261124_143000_12345678.pdf'
+            )
+            ruta_existente.parent.mkdir(parents=True)
+            ruta_existente.write_bytes(contenido_existente)
+
+            with patch(
+                'inventario.views._acta_final_de_tienda',
+                return_value=self.acta_tienda
+            ), patch(
+                'inventario.views.connection', self._database(cursor)
+            ), patch(
+                'inventario.views.timezone.localtime',
+                return_value=datetime(2026, 11, 24, 14, 30, 0)
+            ), patch(
+                'inventario.views.uuid.uuid4',
+                return_value=Mock(hex='12345678abcdef')
+            ), patch(
+                'inventario.views.open', create=True,
+                side_effect=FileExistsError('el archivo ya existe')
+            ), patch('inventario.views.messages') as mensajes, patch(
+                'inventario.views.logger'
+            ):
+                response = views.subir_documento_acta_final(request, 61)
+
+            self.assertEqual(response.status_code, 302)
+            self.assertTrue(ruta_existente.exists())
+            self.assertEqual(ruta_existente.read_bytes(), contenido_existente)
+            self.assertEqual(
+                mensajes.error.call_args.args[1],
+                'No se pudo guardar el archivo en el servidor.'
+            )
+            self.assertFalse(any(
+                'insert into inv_acta_final_documento_tbl' in call.args[0].lower()
+                for call in cursor.execute.call_args_list
+            ))
+
+    def test_ver_documento_bloquea_traversal_y_entrega_pdf_valido(self):
+        request = self._request('/actas-finales-tienda/documento/9/')
+        cursor = MagicMock()
+        cursor.fetchone.return_value = (9, 61, 'DENUNCIA', 'VIGENTE', 'd.pdf', '../../secreto.pdf')
+        with tempfile.TemporaryDirectory() as carpeta, override_settings(
+            ACTAS_FINALES_DOCUMENTOS_DIR=carpeta
+        ), patch(
+            'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+        ), patch('inventario.views.connection', self._database(cursor)):
+            response = views.ver_documento_acta_final(request, 9)
+        self.assertEqual(response.status_code, 404)
+
+        with tempfile.TemporaryDirectory() as carpeta, override_settings(
+            ACTAS_FINALES_DOCUMENTOS_DIR=carpeta
+        ):
+            ruta = Path(carpeta) / 'BSA1' / '61' / 'd.pdf'
+            ruta.parent.mkdir(parents=True)
+            ruta.write_bytes(b'%PDF-1.4')
+            cursor = MagicMock()
+            cursor.fetchone.return_value = (
+                9, 61, 'DENUNCIA', 'VIGENTE', 'd.pdf', 'BSA1/61/d.pdf'
+            )
+            with patch(
+                'inventario.views._acta_final_de_tienda', return_value=self.acta_tienda
+            ), patch('inventario.views.connection', self._database(cursor)):
+                response = views.ver_documento_acta_final(request, 9)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response['Content-Type'], 'application/pdf')
+                response.close()
+
+    def test_dashboard_jefe_muestra_aviso_y_contexto(self):
+        request = self._request('/dashboard/')
+        pendiente = [{
+            'acta_final_id': 61,
+            'codigo_inventario': 'INV-61',
+            'primera_descarga': datetime(2026, 11, 20, 8, 30),
+        }]
+        cursor = MagicMock()
+        with patch(
+            'inventario.views._actas_pendientes_denuncia', return_value=pendiente
+        ), patch(
+            'inventario.views.connection', self._database(cursor)
+        ), patch('inventario.views.render', side_effect=self._render):
+            response = views.dashboard(request)
+
+        self.assertEqual(response.context_data['actas_pendientes_denuncia'], pendiente)
+        self.assertContains(response, 'Denuncia pendiente')
+        self.assertContains(response, reverse('actas_finales_tienda'))
+
+    def test_dashboard_sin_pendientes_no_muestra_aviso(self):
+        request = self._request('/dashboard/')
+        with patch(
+            'inventario.views._actas_pendientes_denuncia', return_value=[]
+        ), patch(
+            'inventario.views.connection', self._database(MagicMock())
+        ), patch('inventario.views.render', side_effect=self._render):
+            response = views.dashboard(request)
+        self.assertNotContains(response, 'Denuncia pendiente')
+
+    def test_dashboard_administrativo_no_consulta_pendientes(self):
+        request = self._request('/dashboard/', perfil='ADMINISTRATIVO')
+        database = MagicMock()
+        with patch(
+            'inventario.views._actas_pendientes_denuncia'
+        ) as helper, patch(
+            'inventario.views.connection', database
+        ), patch('inventario.views.render', side_effect=self._render):
+            response = views.dashboard(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['actas_pendientes_denuncia'], [])
+        helper.assert_not_called()
+        database.cursor.assert_not_called()
+
+    def test_dashboard_tolera_error_de_consulta(self):
+        request = self._request('/dashboard/')
+        with patch(
+            'inventario.views._actas_pendientes_denuncia',
+            side_effect=RuntimeError('tabla no existe')
+        ), patch(
+            'inventario.views.connection', self._database(MagicMock())
+        ), patch(
+            'inventario.views.logger'
+        ) as logger_mock, patch(
+            'inventario.views.render', side_effect=self._render
+        ):
+            response = views.dashboard(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Denuncia pendiente')
+        logger_mock.exception.assert_called_once()
+
+    def test_helper_pendientes_usa_descargas_denuncia_vigente_y_parametros(self):
+        request = self._request('/dashboard/')
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(61, 'INV-61', datetime(2026, 11, 20, 8, 30))]
+        with patch(
+            'inventario.views._filtro_conteos_usuario',
+            return_value=('(p.centro = %s AND p.almacen = %s)', ['BDEPORTIVA', 'BSA1'])
+        ):
+            resultado = views._actas_pendientes_denuncia(cursor, request)
+
+        sql, params = cursor.execute.call_args.args
+        sql_upper = sql.upper()
+        self.assertIn('INV_ACTA_FINAL_DESCARGA_TBL', sql_upper)
+        self.assertIn('NOT EXISTS', sql_upper)
+        self.assertIn("'DENUNCIA'", sql_upper)
+        self.assertIn("'VIGENTE'", sql_upper)
+        self.assertEqual(params, ['BDEPORTIVA', 'BSA1'])
+        self.assertEqual(resultado[0]['acta_final_id'], 61)
 
 
 class ActaFinalPdfConteosTests(SimpleTestCase):

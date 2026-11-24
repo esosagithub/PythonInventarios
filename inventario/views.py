@@ -1,6 +1,6 @@
 # inventario/views.py
 from django.shortcuts import render, redirect
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
@@ -28,6 +28,12 @@ import unicodedata
 import shutil
 import socket
 import subprocess
+import hashlib
+import logging
+import uuid
+
+
+logger = logging.getLogger('django')
 
 
 _ean_reprocesamientos_lock = threading.Lock()
@@ -169,6 +175,15 @@ def acta_preliminar_mapeo_html(request):
 
 def acta_final_consolidacion_html(request):
     doc_path = os.path.join(settings.BASE_DIR, 'doc', 'acta_final_consolidacion.html')
+    try:
+        with open(doc_path, 'r', encoding='utf-8') as file:
+            return HttpResponse(file.read(), content_type='text/html; charset=utf-8')
+    except FileNotFoundError:
+        return HttpResponse('Documento no encontrado.', status=404)
+
+
+def actas_finales_tienda_html(request):
+    doc_path = os.path.join(settings.BASE_DIR, 'doc', 'actas_finales_tienda.html')
     try:
         with open(doc_path, 'r', encoding='utf-8') as file:
             return HttpResponse(file.read(), content_type='text/html; charset=utf-8')
@@ -1014,6 +1029,40 @@ def _filtro_conteos_usuario(request, alias='', admin_global=False):
     return f"{prefix}usuario_responsable = %s", [cedula]
 
 
+def _actas_pendientes_denuncia(cursor, request):
+    """Actas descargadas de la tienda que todavía no tienen denuncia vigente."""
+    filtro, params = _filtro_conteos_usuario(request, 'p')
+    cursor.execute(f"""
+        SELECT af.acta_final_id, af.codigo_inventario, MIN(d.fecha_descarga)
+        FROM acta_final_tbl af
+        JOIN INV_ACTA_FINAL_DESCARGA_TBL d
+          ON d.acta_final_id = af.acta_final_id
+        WHERE NVL(UPPER(af.estado), 'ACTIVO') = 'ACTIVO'
+          AND EXISTS (
+              SELECT 1 FROM INV_PIQUEOS_INVENTARIO_TBL p
+              WHERE INSTR(',' || REPLACE(af.numeros_conteo, ' ', '') || ',',
+                          ',' || p.numero_conteo || ',') > 0
+                AND {filtro}
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM INV_ACTA_FINAL_DOCUMENTO_TBL doc
+              WHERE doc.acta_final_id = af.acta_final_id
+                AND doc.tipo_documento = 'DENUNCIA'
+                AND doc.estado = 'VIGENTE'
+          )
+        GROUP BY af.acta_final_id, af.codigo_inventario
+        ORDER BY MIN(d.fecha_descarga)
+    """, params)
+    return [
+        {
+            'acta_final_id': row[0],
+            'codigo_inventario': row[1],
+            'primera_descarga': row[2],
+        }
+        for row in cursor.fetchall()
+    ]
+
+
 def _puede_acceder_tienda(request, centro, almacen):
     perfil = _perfil_nombre(request)
     if perfil == 'ADMINISTRATIVO':
@@ -1513,10 +1562,23 @@ def dashboard(request):
     if 'tienda' not in usuario_context:
         usuario_context['tienda'] = usuario_context.get('empresa', '')
 
+    actas_pendientes_denuncia = []
+    if perfil_nombre == 'JEFE DE TIENDA':
+        try:
+            with connection.cursor() as cursor:
+                actas_pendientes_denuncia = _actas_pendientes_denuncia(
+                    cursor, request
+                )
+        except Exception:
+            logger.exception(
+                'No se pudo consultar el aviso de denuncias pendientes'
+            )
+
     context = {
         'usuario': usuario_context,
         'perfil': perfil_nombre,
-        'perfil_completo': perfil_completo
+        'perfil_completo': perfil_completo,
+        'actas_pendientes_denuncia': actas_pendientes_denuncia,
     }
 
     return render(request, 'inventario/dashboard.html', context)
@@ -8385,6 +8447,350 @@ def auditoria_verifica_segundo_conteo(request, numero_conteo):
         if 'ORA-00942' in mensaje:
             mensaje = 'No existe la tabla INV_DIFERENCIA_LOG_TBL. Ejecute el script de creacion.'
         return JsonResponse({'success': False, 'message': mensaje}, status=500)
+
+
+TIPOS_DOCUMENTO_ACTA_FINAL = {
+    'ACTA_FIRMADA': 'Acta firmada',
+    'DENUNCIA': 'Denuncia',
+}
+
+
+def _acta_final_de_tienda(cursor, request, acta_final_id):
+    """Devuelve el acta activa si pertenece a una tienda asignada al jefe."""
+    filtro, params = _filtro_conteos_usuario(request, 'p')
+    cursor.execute(f"""
+        SELECT af.acta_final_id, p.centro, p.almacen
+        FROM acta_final_tbl af
+        JOIN INV_PIQUEOS_INVENTARIO_TBL p
+          ON INSTR(',' || REPLACE(af.numeros_conteo, ' ', '') || ',',
+                   ',' || p.numero_conteo || ',') > 0
+        WHERE af.acta_final_id = %s
+          AND NVL(UPPER(af.estado), 'ACTIVO') = 'ACTIVO'
+          AND {filtro}
+          AND ROWNUM = 1
+    """, [acta_final_id, *params])
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return {
+        'acta_final_id': row[0],
+        'centro': row[1],
+        'almacen': row[2],
+    }
+
+
+def _ruta_documento_segura(ruta_relativa):
+    base = os.path.realpath(settings.ACTAS_FINALES_DOCUMENTOS_DIR)
+    destino = os.path.realpath(os.path.join(base, str(ruta_relativa or '')))
+    try:
+        if os.path.commonpath([base, destino]) != base:
+            return None
+    except ValueError:
+        return None
+    return destino
+
+
+def _nombre_carpeta_seguro(texto):
+    seguro = ''.join(
+        caracter for caracter in str(texto or '')
+        if caracter.isascii() and (caracter.isalnum() or caracter in '_-')
+    )
+    return seguro or 'SIN_TIENDA'
+
+
+def actas_finales_tienda(request):
+    if 'usuario' not in request.session:
+        return redirect('login')
+    if _perfil_nombre(request) != 'JEFE DE TIENDA':
+        messages.error(
+            request,
+            'No tiene permisos para acceder a Actas Finales de Tienda.'
+        )
+        return redirect('dashboard')
+
+    filtro, params = _filtro_conteos_usuario(request, 'p')
+    with connection.cursor() as cursor:
+        cursor.execute(f"""
+            SELECT af.acta_final_id, af.codigo_inventario,
+                   af.numeros_conteo, af.fecha_creacion,
+                   MIN(p.centro), MIN(p.almacen)
+            FROM acta_final_tbl af
+            JOIN INV_PIQUEOS_INVENTARIO_TBL p
+              ON INSTR(',' || REPLACE(af.numeros_conteo, ' ', '') || ',',
+                       ',' || p.numero_conteo || ',') > 0
+            WHERE {filtro}
+              AND NVL(UPPER(af.estado), 'ACTIVO') = 'ACTIVO'
+            GROUP BY af.acta_final_id, af.codigo_inventario,
+                     af.numeros_conteo, af.fecha_creacion
+            ORDER BY af.fecha_creacion DESC
+        """, params)
+        actas_rows = cursor.fetchall()
+
+        ids = [row[0] for row in actas_rows]
+        descargas = {}
+        documentos = {}
+        if ids:
+            placeholders = ', '.join(['%s'] * len(ids))
+            cursor.execute(f"""
+                SELECT acta_final_id, COUNT(*),
+                       MIN(fecha_descarga), MAX(fecha_descarga)
+                FROM INV_ACTA_FINAL_DESCARGA_TBL
+                WHERE acta_final_id IN ({placeholders})
+                GROUP BY acta_final_id
+            """, ids)
+            descargas = {
+                row[0]: {
+                    'cantidad': int(row[1] or 0),
+                    'primera': row[2],
+                    'ultima': row[3],
+                }
+                for row in cursor.fetchall()
+            }
+
+            cursor.execute(f"""
+                SELECT documento_id, acta_final_id, tipo_documento,
+                       nombre_original, fecha_carga, nombre_usuario
+                FROM INV_ACTA_FINAL_DOCUMENTO_TBL
+                WHERE acta_final_id IN ({placeholders})
+                  AND estado = 'VIGENTE'
+            """, ids)
+            for row in cursor.fetchall():
+                documentos.setdefault(row[1], {})[row[2]] = {
+                    'documento_id': row[0],
+                    'nombre_original': row[3],
+                    'fecha_carga': row[4],
+                    'nombre_usuario': row[5],
+                }
+
+    actas = []
+    for row in actas_rows:
+        acta_id = row[0]
+        actas.append({
+            'acta_final_id': acta_id,
+            'codigo_inventario': row[1],
+            'conteos': [
+                numero.strip()
+                for numero in str(row[2] or '').split(',')
+                if numero.strip()
+            ],
+            'fecha_generacion': row[3],
+            'centro': row[4],
+            'almacen': row[5],
+            'descargas': descargas.get(acta_id, {
+                'cantidad': 0, 'primera': None, 'ultima': None
+            }),
+            'documentos': documentos.get(acta_id, {}),
+        })
+
+    return render(request, 'inventario/actas_finales_tienda.html', {
+        'usuario': request.session['usuario'],
+        'perfil': _perfil_nombre(request),
+        'actas': actas,
+        'max_mb': settings.ACTAS_FINALES_DOCUMENTO_MAX_MB,
+    })
+
+
+def descargar_acta_final_tienda(request, acta_final_id):
+    if 'usuario' not in request.session:
+        return redirect('login')
+    if _perfil_nombre(request) != 'JEFE DE TIENDA':
+        return HttpResponse('No tiene permisos.', status=403)
+
+    with connection.cursor() as cursor:
+        acta = _acta_final_de_tienda(cursor, request, acta_final_id)
+    if not acta:
+        return HttpResponse('Acta final no encontrada.', status=404)
+
+    response = imprimir_acta_final_pdf(request, acta_final_id)
+    if response.status_code != 200:
+        return response
+
+    usuario = request.session.get('usuario', {})
+    try:
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO INV_ACTA_FINAL_DESCARGA_TBL (
+                    ACTA_FINAL_ID, CENTRO, ALMACEN, CEDULA_USUARIO,
+                    NOMBRE_USUARIO, PERFIL, DIRECCION_IP, FECHA_DESCARGA
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, SYSTIMESTAMP)
+            """, [
+                acta_final_id, acta['centro'], acta['almacen'],
+                usuario.get('cedula', ''), usuario.get('nombre', ''),
+                _perfil_nombre(request), request.META.get('REMOTE_ADDR', ''),
+            ])
+    except Exception:
+        logger.exception(
+            'No se pudo registrar la descarga del acta final %s',
+            acta_final_id
+        )
+        return HttpResponse(
+            'No se pudo registrar la descarga del acta final.', status=500
+        )
+
+    response['Content-Disposition'] = (
+        f'attachment; filename="acta_final_{acta_final_id}.pdf"'
+    )
+    return response
+
+
+def subir_documento_acta_final(request, acta_final_id):
+    if 'usuario' not in request.session:
+        return redirect('login')
+    if _perfil_nombre(request) != 'JEFE DE TIENDA':
+        return HttpResponse('No tiene permisos.', status=403)
+    if request.method != 'POST':
+        return HttpResponse('Método no permitido.', status=405)
+
+    with connection.cursor() as cursor:
+        acta = _acta_final_de_tienda(cursor, request, acta_final_id)
+    if not acta:
+        return HttpResponse('Acta final no encontrada.', status=404)
+
+    tipo_documento = str(request.POST.get('tipo_documento') or '').upper()
+    archivo = request.FILES.get('archivo')
+    max_mb = settings.ACTAS_FINALES_DOCUMENTO_MAX_MB
+    max_bytes = max_mb * 1024 * 1024
+
+    def rechazar(mensaje):
+        messages.error(request, mensaje)
+        return redirect('actas_finales_tienda')
+
+    if tipo_documento not in TIPOS_DOCUMENTO_ACTA_FINAL:
+        return rechazar('El tipo de documento no es válido.')
+    if not archivo or archivo.size <= 0:
+        return rechazar('Seleccione un archivo PDF que no esté vacío.')
+    if not str(archivo.name or '').lower().endswith('.pdf'):
+        return rechazar('El archivo debe tener extensión .pdf.')
+    if archivo.size > max_bytes:
+        return rechazar(f'El archivo no puede superar {max_mb} MB.')
+
+    encabezado = archivo.read(5)
+    archivo.seek(0)
+    if encabezado != b'%PDF-':
+        return rechazar('El contenido del archivo no corresponde a un PDF válido.')
+
+    if tipo_documento == 'ACTA_FIRMADA':
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) FROM INV_ACTA_FINAL_DESCARGA_TBL
+                WHERE acta_final_id = %s
+            """, [acta_final_id])
+            if not (cursor.fetchone() or [0])[0]:
+                return rechazar(
+                    'Descargue el acta final antes de subir el acta firmada'
+                )
+
+    almacen_seguro = _nombre_carpeta_seguro(acta['almacen'])
+    carpeta_relativa = os.path.join(almacen_seguro, str(acta_final_id))
+    carpeta_absoluta = _ruta_documento_segura(carpeta_relativa)
+    if not carpeta_absoluta:
+        return rechazar('No se pudo preparar una ruta segura para el archivo.')
+
+    marca_tiempo = timezone.localtime().strftime('%Y%m%d_%H%M%S')
+    nombre_disco = f'{tipo_documento}_{marca_tiempo}_{uuid.uuid4().hex[:8]}.pdf'
+    ruta_absoluta = os.path.join(carpeta_absoluta, nombre_disco)
+    ruta_relativa = os.path.join(carpeta_relativa, nombre_disco).replace('\\', '/')
+    digest = hashlib.sha256()
+    tamano_real = 0
+    archivo_creado = False
+
+    try:
+        os.makedirs(carpeta_absoluta, exist_ok=True)
+        with open(ruta_absoluta, 'xb') as destino:
+            archivo_creado = True
+            for bloque in archivo.chunks():
+                destino.write(bloque)
+                digest.update(bloque)
+                tamano_real += len(bloque)
+    except Exception:
+        if archivo_creado:
+            try:
+                os.remove(ruta_absoluta)
+            except OSError:
+                pass
+        logger.exception(
+            'No se pudo guardar el documento del acta final %s', acta_final_id
+        )
+        return rechazar('No se pudo guardar el archivo en el servidor.')
+
+    usuario = request.session.get('usuario', {})
+    try:
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT acta_final_id FROM acta_final_tbl
+                WHERE acta_final_id = %s FOR UPDATE
+            """, [acta_final_id])
+            if not cursor.fetchone():
+                raise ValueError('El acta final ya no existe')
+
+            cursor.execute("""
+                UPDATE INV_ACTA_FINAL_DOCUMENTO_TBL
+                SET estado = 'REEMPLAZADO'
+                WHERE acta_final_id = %s
+                  AND tipo_documento = %s
+                  AND estado = 'VIGENTE'
+            """, [acta_final_id, tipo_documento])
+            cursor.execute("""
+                INSERT INTO INV_ACTA_FINAL_DOCUMENTO_TBL (
+                    ACTA_FINAL_ID, TIPO_DOCUMENTO, ESTADO,
+                    NOMBRE_ORIGINAL, RUTA_RELATIVA, TAMANO_BYTES,
+                    HASH_SHA256, CENTRO, ALMACEN, CEDULA_USUARIO,
+                    NOMBRE_USUARIO, FECHA_CARGA
+                ) VALUES (
+                    %s, %s, 'VIGENTE', %s, %s, %s, %s,
+                    %s, %s, %s, %s, SYSTIMESTAMP
+                )
+            """, [
+                acta_final_id, tipo_documento,
+                os.path.basename(str(archivo.name))[:255], ruta_relativa,
+                tamano_real, digest.hexdigest(), acta['centro'],
+                acta['almacen'], usuario.get('cedula', ''),
+                usuario.get('nombre', ''),
+            ])
+    except Exception:
+        try:
+            os.remove(ruta_absoluta)
+        except OSError:
+            pass
+        logger.exception(
+            'No se pudo registrar el documento del acta final %s',
+            acta_final_id
+        )
+        return rechazar('No se pudo registrar el documento. Intente nuevamente.')
+
+    messages.success(
+        request,
+        f'{TIPOS_DOCUMENTO_ACTA_FINAL[tipo_documento]} subida correctamente.'
+    )
+    return redirect('actas_finales_tienda')
+
+
+def ver_documento_acta_final(request, documento_id):
+    if 'usuario' not in request.session:
+        return redirect('login')
+    if _perfil_nombre(request) != 'JEFE DE TIENDA':
+        return HttpResponse('No tiene permisos.', status=403)
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT documento_id, acta_final_id, tipo_documento, estado,
+                   nombre_original, ruta_relativa
+            FROM INV_ACTA_FINAL_DOCUMENTO_TBL
+            WHERE documento_id = %s
+        """, [documento_id])
+        row = cursor.fetchone()
+        if not row or not _acta_final_de_tienda(cursor, request, row[1]):
+            return HttpResponse('Documento no encontrado.', status=404)
+
+    ruta = _ruta_documento_segura(row[5])
+    if not ruta or not os.path.isfile(ruta):
+        return HttpResponse('Documento no encontrado.', status=404)
+    return FileResponse(
+        open(ruta, 'rb'),
+        content_type='application/pdf',
+        as_attachment=False,
+        filename=row[4],
+    )
 
 
 def acta_final(request):

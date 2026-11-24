@@ -1,0 +1,219 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="menu-toggle" id="menuToggle"><span></span><span></span><span></span></div>
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h3>Sistema Inventarios</h3>
+            <p>{{ usuario.nombre|truncatewords:2 }}</p>
+            <small>{{ perfil }}</small>
+        </div>
+        <nav class="sidebar-menu"><ul>
+            <li class="menu-item"><a href="{% url 'dashboard' %}"><span>Dashboard</span></a></li>
+            <li class="menu-item"><a href="{% url 'administracion_conteo_jefe' %}"><span>Administración de Conteo</span></a></li>
+            <li class="menu-item"><a href="{% url 'gestion_conteos' %}"><span>Gestión de Conteos</span></a></li>
+            <li class="menu-item active"><a href="{% url 'actas_finales_tienda' %}"><span>Actas Finales de Tienda</span></a></li>
+        </ul></nav>
+        <div class="sidebar-footer"><a href="{% url 'login' %}" class="logout-btn"><span>Cerrar Sesión</span></a></div>
+    </div>
+
+    <div class="main-content" id="mainContent">
+        <div class="content-header">
+            <h1>Actas Finales de Tienda</h1>
+            <p>Descargue el acta final y cargue los documentos obligatorios de su tienda.</p>
+        </div>
+
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}" role="alert">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+
+        <div class="card actas-card">
+            <div class="table-responsive">
+                <table class="data-table actas-table">
+                    <thead><tr>
+                        <th>N° acta</th>
+                        <th>Código de inventario</th>
+                        <th>Conteos</th>
+                        <th>Tienda</th>
+                        <th>Generación</th>
+                        <th>Descargas</th>
+                        <th>Acta firmada</th>
+                        <th>Denuncia <small>(obligatoria)</small></th>
+                    </tr></thead>
+                    <tbody>
+                    {% for acta in actas %}
+                        <tr>
+                            <td>
+                                <strong>{{ acta.acta_final_id }}</strong>
+                                <a class="btn btn-primary btn-descarga"
+                                   href="{% url 'descargar_acta_final_tienda' acta.acta_final_id %}"
+                                   data-acta-id="{{ acta.acta_final_id }}">
+                                    <i class="fas fa-download"></i> Descargar PDF
+                                </a>
+                            </td>
+                            <td>{{ acta.codigo_inventario|default:'-' }}</td>
+                            <td>{% for conteo in acta.conteos %}<div>{{ conteo }}</div>{% empty %}-{% endfor %}</td>
+                            <td>{{ acta.centro|default:'-' }} / {{ acta.almacen|default:'-' }}</td>
+                            <td>{{ acta.fecha_generacion|date:'d/m/Y H:i'|default:'-' }}</td>
+                            <td>
+                                {% if acta.descargas.cantidad %}
+                                <strong>{{ acta.descargas.cantidad }} descarga{{ acta.descargas.cantidad|pluralize }}</strong>
+                                <small>Primera: {{ acta.descargas.primera|date:'d/m/Y H:i' }}</small>
+                                <small>Última: {{ acta.descargas.ultima|date:'d/m/Y H:i' }}</small>
+                                {% else %}
+                                <span class="badge badge-neutral">Sin descargas</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% with documento=acta.documentos.ACTA_FIRMADA %}
+                                    {% if documento %}
+                                    <a target="_blank" rel="noopener" href="{% url 'ver_documento_acta_final' documento.documento_id %}">Ver</a>
+                                    <small>{{ documento.fecha_carga|date:'d/m/Y H:i' }}</small>
+                                    <small>{{ documento.nombre_usuario|default:'-' }}</small>
+                                    {% else %}
+                                    <span class="badge badge-pending">Pendiente</span>
+                                    {% endif %}
+
+                                    {% if acta.descargas.cantidad %}
+                                    <form class="documento-form" method="post" enctype="multipart/form-data"
+                                          action="{% url 'subir_documento_acta_final' acta.acta_final_id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="tipo_documento" value="ACTA_FIRMADA">
+                                        <input type="file" name="archivo" accept="application/pdf,.pdf" required>
+                                        <button class="btn btn-primary" type="submit">{% if documento %}Reemplazar{% else %}Subir{% endif %}</button>
+                                    </form>
+                                    {% else %}
+                                    <small class="ayuda-bloqueada">Descargue el acta antes de subir la firmada.</small>
+                                    <input type="file" disabled aria-label="Acta firmada deshabilitada">
+                                    <button class="btn" type="button" disabled>Subir</button>
+                                    {% endif %}
+                                {% endwith %}
+                            </td>
+                            <td>
+                                {% with documento=acta.documentos.DENUNCIA %}
+                                    {% if documento %}
+                                    <a target="_blank" rel="noopener" href="{% url 'ver_documento_acta_final' documento.documento_id %}">Ver</a>
+                                    <small>{{ documento.fecha_carga|date:'d/m/Y H:i' }}</small>
+                                    <small>{{ documento.nombre_usuario|default:'-' }}</small>
+                                    {% else %}
+                                    <span class="badge {% if acta.descargas.cantidad %}badge-required{% else %}badge-pending{% endif %}">Pendiente</span>
+                                    {% endif %}
+                                    <small class="nota-obligatoria">(obligatoria)</small>
+                                    <form class="documento-form" method="post" enctype="multipart/form-data"
+                                          action="{% url 'subir_documento_acta_final' acta.acta_final_id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="tipo_documento" value="DENUNCIA">
+                                        <input type="file" name="archivo" accept="application/pdf,.pdf" required>
+                                        <button class="btn btn-primary" type="submit">{% if documento %}Reemplazar{% else %}Subir{% endif %}</button>
+                                    </form>
+                                {% endwith %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8" class="text-center">No hay actas finales generadas para su tienda</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.actas-card { margin-top: 16px; }
+.actas-table { min-width: 1350px; }
+.actas-table td { vertical-align: top; min-width: 120px; }
+.actas-table small { display: block; margin-top: 4px; color: #64748b; }
+.btn-descarga { display: block; width: max-content; margin-top: 10px; white-space: nowrap; }
+.documento-form { display: grid; gap: 7px; margin-top: 10px; min-width: 190px; }
+.documento-form input[type="file"] { width: 100%; font-size: 12px; }
+.badge { display: inline-block; padding: 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.badge-neutral { color: #475569; background: #e2e8f0; }
+.badge-pending { color: #92400e; background: #fef3c7; }
+.badge-required { color: #991b1b; background: #fee2e2; border: 1px solid #fca5a5; }
+.nota-obligatoria { color: #991b1b !important; font-weight: 700; }
+.ayuda-bloqueada { color: #991b1b !important; margin-bottom: 6px; }
+@media (max-width: 700px) {
+    .content-header { padding: 18px; }
+    .actas-card { padding: 10px; }
+    .actas-table { font-size: 12px; }
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const maxBytes = Number('{{ max_mb }}') * 1024 * 1024;
+
+    document.querySelectorAll('.btn-descarga').forEach(function (boton) {
+        boton.addEventListener('click', async function (evento) {
+            evento.preventDefault();
+            if (boton.getAttribute('aria-disabled') === 'true') return;
+
+            const contenidoOriginal = boton.innerHTML;
+            boton.setAttribute('aria-disabled', 'true');
+            boton.style.pointerEvents = 'none';
+            boton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generando…';
+
+            try {
+                const response = await fetch(boton.href, {
+                    credentials: 'same-origin'
+                });
+                if (response.redirected) {
+                    // Sesión vencida: el servidor redirigió al login.
+                    window.location.href = response.url;
+                    return;
+                }
+                const contentType = (response.headers.get('Content-Type') || '').toLowerCase();
+                if (!response.ok || !contentType.includes('application/pdf')) {
+                    // 403, 404, 500 o respuesta que no es PDF: avisar sin repetir la solicitud.
+                    throw new Error('No se pudo generar el PDF.');
+                }
+
+                const blob = await response.blob();
+                const urlTemporal = URL.createObjectURL(blob);
+                const enlaceTemporal = document.createElement('a');
+                enlaceTemporal.href = urlTemporal;
+                enlaceTemporal.download = `acta_final_${boton.dataset.actaId}.pdf`;
+                enlaceTemporal.style.display = 'none';
+                document.body.appendChild(enlaceTemporal);
+                enlaceTemporal.click();
+                enlaceTemporal.remove();
+
+                setTimeout(function () {
+                    URL.revokeObjectURL(urlTemporal);
+                    window.location.reload();
+                }, 1500);
+            } catch (error) {
+                alert('No se pudo descargar el acta final. Por favor, intente nuevamente.');
+                boton.removeAttribute('aria-disabled');
+                boton.style.pointerEvents = '';
+                boton.innerHTML = contenidoOriginal;
+            }
+        });
+    });
+
+    document.querySelectorAll('.documento-form').forEach(function (formulario) {
+        formulario.addEventListener('submit', function (evento) {
+            const input = formulario.querySelector('input[type="file"]');
+            const archivo = input && input.files ? input.files[0] : null;
+            if (!archivo) return;
+            if (!archivo.name.toLowerCase().endsWith('.pdf') ||
+                (archivo.type && archivo.type !== 'application/pdf')) {
+                evento.preventDefault();
+                alert('Seleccione un archivo PDF válido.');
+                return;
+            }
+            if (archivo.size > maxBytes) {
+                evento.preventDefault();
+                alert('El archivo no puede superar {{ max_mb }} MB.');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}
