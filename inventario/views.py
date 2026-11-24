@@ -21,6 +21,7 @@ import oracledb as cx_Oracle
 import os
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from inventario.templatetags.custom_filters import format_number
 import time
 import threading
 import unicodedata
@@ -116,6 +117,7 @@ def health_check(request):
     database_ok = False
     database_error = None
     database_ms = None
+    pm2_ms = None
 
     try:
         db_inicio = time.perf_counter()
@@ -127,7 +129,9 @@ def health_check(request):
         database_error = str(exc)[:300]
         connection.close()
 
+    pm2_inicio = time.perf_counter()
     pm2 = _consultar_pm2()
+    pm2_ms = round((time.perf_counter() - pm2_inicio) * 1000, 1)
     pm2_error = not pm2['port_3001'] or (pm2['available'] and not pm2['online'])
     pm2_warning = pm2['port_3001'] and not pm2['available']
 
@@ -137,6 +141,7 @@ def health_check(request):
         'database': database_ok,
         'database_ms': database_ms,
         'database_error': database_error,
+        'pm2_ms': pm2_ms,
         'response_ms': round((time.perf_counter() - inicio) * 1000, 1),
         'server_time': timezone.now().isoformat(),
         'uptime_seconds': int(time.time() - _app_started_at),
@@ -319,6 +324,272 @@ def _parse_fecha_bd(valor, include_time=True):
 
     print(f"⚠️ Fecha inválida omitida para acta: {valor!r}")
     return None
+
+
+MAX_CONTEOS_ACTA_FINAL = 5
+
+
+def _mensaje_exceso_conteos_acta_final(cantidad):
+    return (
+        'Excedió el número máximo de conteos para el acta final: '
+        f'puede unificar máximo {MAX_CONTEOS_ACTA_FINAL} conteos y seleccionó {cantidad}.'
+    )
+
+
+def _fecha_corta(valor):
+    """Formatea una fecha como dd/mm/aaaa; devuelve '' si no hay fecha."""
+    fecha = _parse_fecha_bd(valor, include_time=False)
+    return fecha.strftime('%d/%m/%Y') if fecha else ''
+
+
+_CARGOS_PERSONAL_EJECUTANDO = (
+    'jefe_tienda', 'subjefe_tienda', 'auxiliar_ventas',
+    'auxiliar_caja', 'auxiliar_bodega', 'auxiliar_operativo',
+)
+_CARGOS_PERSONAL_ADMINISTRATIVO = (
+    'asistente_opertaivo_inventario', 'jefe_inventarios', 'auditor_interno',
+    'contado', 'gerente_regional', 'supervisor_comercial',
+)
+# Mismo orden que las columnas de personal en el INSERT/UPDATE de acta_final_tbl
+_CARGOS_PERSONAL_ACTA = _CARGOS_PERSONAL_EJECUTANDO + _CARGOS_PERSONAL_ADMINISTRATIVO
+
+
+def _promedio_personal_actas_preliminares(cursor, numeros_conteo):
+    """
+    Promedio por cargo (redondeado a entero) del personal ejecutando la toma física y del
+    personal administrativo presente, tomado de las actas preliminares de los conteos indicados.
+    Devuelve None si ninguno de los conteos tiene acta preliminar.
+    """
+    numeros = list(dict.fromkeys(str(n).strip() for n in numeros_conteo if str(n).strip()))
+    if not numeros:
+        return None
+    placeholders = ','.join(['%s'] * len(numeros))
+    promedios_sql = ', '.join(
+        f'ROUND(AVG(NVL({cargo}, 0)))' for cargo in _CARGOS_PERSONAL_ACTA
+    )
+    cursor.execute(f"""
+        SELECT COUNT(*), {promedios_sql}
+        FROM acta_preliminar_tbl
+        WHERE numero_conteo IN ({placeholders})
+    """, numeros)
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return None
+    return {
+        cargo: int(valor or 0)
+        for cargo, valor in zip(_CARGOS_PERSONAL_ACTA, row[1:])
+    }
+
+
+_CAMPOS_VALORES_CAJA = (
+    'valor_efectivo', 'valor_facturas', 'valor_cheques',
+    'fondo_caja', 'fondo_sueltos', 'total',
+)
+
+
+def _promedio_valores_caja(cursor, numeros_conteo):
+    """
+    Valores de caja del acta final: promedio (redondeado a 2 decimales) de cada valor de caja
+    de las actas preliminares de los conteos indicados. Devuelve None si ninguno de los
+    conteos tiene acta preliminar.
+    """
+    numeros = list(dict.fromkeys(str(n).strip() for n in numeros_conteo if str(n).strip()))
+    if not numeros:
+        return None
+    placeholders = ','.join(['%s'] * len(numeros))
+    promedios_sql = ', '.join(
+        f'ROUND(AVG(NVL({campo}, 0)), 2)' for campo in _CAMPOS_VALORES_CAJA
+    )
+    cursor.execute(f"""
+        SELECT COUNT(*), {promedios_sql}
+        FROM acta_preliminar_tbl
+        WHERE numero_conteo IN ({placeholders})
+    """, numeros)
+    row = cursor.fetchone()
+    if not row or not row[0]:
+        return None
+    return {
+        campo: float(valor or 0)
+        for campo, valor in zip(_CAMPOS_VALORES_CAJA, row[1:])
+    }
+
+
+def _codigo_inventario_ultimo_conteo(cursor, numeros_conteo):
+    """
+    Código de inventario del acta final: número del último conteo de los seleccionados,
+    es decir, el creado más recientemente (mayor piqueo_id).
+    Devuelve None si no encuentra ninguno de los conteos.
+    """
+    numeros = list(dict.fromkeys(str(n).strip() for n in numeros_conteo if str(n).strip()))
+    if not numeros:
+        return None
+    placeholders = ','.join(['%s'] * len(numeros))
+    cursor.execute(f"""
+        SELECT numero_conteo FROM (
+            SELECT numero_conteo
+            FROM INV_PIQUEOS_INVENTARIO_TBL
+            WHERE numero_conteo IN ({placeholders})
+            ORDER BY piqueo_id DESC
+        ) WHERE ROWNUM = 1
+    """, numeros)
+    row = cursor.fetchone()
+    return str(row[0]).strip() if row and row[0] else None
+
+
+_CAMPOS_DOCUMENTOS_ULTIMO_CONTEO = (
+    'ultima_fact_caja1', 'ultima_fact_caja2', 'ultima_fact_caja3',
+    'ultima_fact_caja4', 'ultima_fact_caja5',
+    'ultimo_doc_guia_remision', 'ultimo_doc_nota_credit',
+)
+DOCUMENTOS_MAX_LEN = 50  # ACTA_FINAL_TBL.ULTIMA_FACT_CAJA*/ULTIMO_DOC_* son VARCHAR2(50)
+
+
+def _documentos_ultimo_conteo(cursor, numeros_conteo):
+    """
+    Última factura de venta (caja1..caja5) y último número de documento (guía de remisión,
+    nota de crédito) del acta final: se toman del acta preliminar del ÚLTIMO conteo de los
+    seleccionados (el creado más recientemente, mayor piqueo_id). Los valores vacíos quedan ''.
+    Devuelve None si ninguno de los conteos tiene acta preliminar.
+    """
+    numeros = list(dict.fromkeys(str(n).strip() for n in numeros_conteo if str(n).strip()))
+    if not numeros:
+        return None
+    placeholders = ','.join(['%s'] * len(numeros))
+    columnas = ', '.join(_CAMPOS_DOCUMENTOS_ULTIMO_CONTEO)
+    cursor.execute(f"""
+        SELECT {columnas} FROM (
+            SELECT {columnas}
+            FROM acta_preliminar_tbl
+            WHERE numero_conteo IN ({placeholders})
+            ORDER BY piqueo_id DESC
+        ) WHERE ROWNUM = 1
+    """, numeros)
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return {
+        campo: (str(valor).strip()[:DOCUMENTOS_MAX_LEN] if valor is not None else '')
+        for campo, valor in zip(_CAMPOS_DOCUMENTOS_ULTIMO_CONTEO, row)
+    }
+
+
+TOMA_FISICA_GRUPO_MAX_LEN = 100  # ACTA_FINAL_TBL.TOMA_FISICA_GRUPO es VARCHAR2(100)
+
+
+def _grupos_toma_fisica(cursor, numeros_conteo):
+    """
+    Toma física grupo del acta final: todos los grupos planificados de los conteos
+    seleccionados, sin repetir, en orden alfabético y separados por coma.
+    Devuelve None si no encuentra grupos planificados.
+    """
+    numeros = list(dict.fromkeys(str(n).strip() for n in numeros_conteo if str(n).strip()))
+    if not numeros:
+        return None
+    placeholders = ','.join(['%s'] * len(numeros))
+    cursor.execute(f"""
+        SELECT DISTINCT d.grupo_articulos
+        FROM INV_PIQUEOS_INVENTARIO_TBL p
+        JOIN inv_detalle_piqueos_inventarios_tbl d ON d.piqueo_id = p.piqueo_id
+        WHERE p.numero_conteo IN ({placeholders})
+          AND d.grupo_articulos IS NOT NULL
+        ORDER BY d.grupo_articulos
+    """, numeros)
+    grupos = list(dict.fromkeys(
+        str(r[0]).strip() for r in cursor.fetchall() if r and r[0] and str(r[0]).strip()
+    ))
+    if not grupos:
+        return None
+    return ', '.join(grupos)[:TOMA_FISICA_GRUPO_MAX_LEN]
+
+
+def _inventario_anterior(cursor, numeros_conteo, acta_final_id=None, fecha_creacion=None,
+                         cantidad_items_propia=0):
+    """
+    Datos del inventario anterior para el acta final, tomados del último acta final generado
+    ANTES de esta para la misma tienda (centro_costo de los conteos):
+      - fecha: fecha de creación de esa acta (Fecha de la toma física de inventario anterior)
+      - cantidad_items: su Cantidad ITEMS (Cantidad Items toma física parcial último inventario)
+      - anio: año de esa acta (para las etiquetas "... último inventario <año>" y
+        "Número de tomas Físicas anteriores en el año <año>")
+      - numero_tomas_anteriores: cuántas actas finales tuvo la tienda antes de esta,
+        en el año del acta anterior
+      - acumulado_anual: Cantidad ITEMS de las actas finales de la tienda en el año de esta
+        acta, incluida esta (Cantidad Items toma física ACUMULATIVO ANUAL)
+    Si la tienda no tiene un acta final anterior, se usan los datos de esta misma acta:
+    su fecha de generación (o hoy si todavía no existe), cantidad_items_propia y 0 tomas.
+    """
+    def _cantidad(valor):
+        # str() para que un valor guardado como Decimal('2.385') (2385 mal interpretado) quede 2385
+        return _parse_numero_formateado(
+            str(valor) if valor not in (None, '') else None, default=0, entero=True
+        )
+
+    referencia = _parse_fecha_bd(fecha_creacion) if fecha_creacion else None
+    fecha_propia = (referencia or datetime.now()).date()
+    cantidad_propia = _cantidad(cantidad_items_propia)
+    propio = {
+        'fecha': fecha_propia,
+        'cantidad_items': cantidad_propia,
+        'anio': fecha_propia.year,
+        'numero_tomas_anteriores': 0,
+        'acumulado_anual': cantidad_propia,
+    }
+
+    numeros = list(dict.fromkeys(str(n).strip() for n in numeros_conteo if str(n).strip()))
+    if not numeros:
+        return propio
+
+    placeholders = ','.join(['%s'] * len(numeros))
+    cursor.execute(f"""
+        SELECT DISTINCT centro_costo
+        FROM INV_PIQUEOS_INVENTARIO_TBL
+        WHERE numero_conteo IN ({placeholders})
+          AND centro_costo IS NOT NULL
+    """, numeros)
+    tiendas = list(dict.fromkeys(
+        str(r[0]).strip() for r in cursor.fetchall() if r and r[0] and str(r[0]).strip()
+    ))
+    if not tiendas:
+        return propio
+
+    tiendas_ph = ','.join(['%s'] * len(tiendas))
+    filtro_fecha = 'af.fecha_creacion < %s' if referencia else 'af.fecha_creacion < SYSDATE'
+    params = [acta_final_id if acta_final_id is not None else -1]
+    if referencia:
+        params.append(referencia)
+    params += tiendas
+    # Todas las actas finales anteriores de la tienda (son pocas), de la más reciente a la más antigua.
+    # Los cálculos se hacen en Python para normalizar cantidades mal guardadas (ej. 2.385).
+    cursor.execute(f"""
+        SELECT af.fecha_creacion, af.cantidad_items
+        FROM acta_final_tbl af
+        WHERE af.acta_final_id <> %s
+          AND {filtro_fecha}
+          AND EXISTS (
+              SELECT 1
+              FROM INV_PIQUEOS_INVENTARIO_TBL p
+              WHERE p.centro_costo IN ({tiendas_ph})
+                AND INSTR(',' || REPLACE(af.numeros_conteo, ' ', '') || ',',
+                          ',' || p.numero_conteo || ',') > 0
+          )
+        ORDER BY af.fecha_creacion DESC
+    """, params)
+    previas = []
+    for r in cursor.fetchall() or []:
+        fecha = _parse_fecha_bd(r[0], include_time=False) if r and r[0] else None
+        if fecha:
+            previas.append((fecha, _cantidad(r[1] if len(r) > 1 else None)))
+    if not previas:
+        return propio
+
+    fecha_anterior, cantidad_anterior = previas[0]
+    return {
+        'fecha': fecha_anterior,
+        'cantidad_items': cantidad_anterior,
+        'anio': fecha_anterior.year,
+        'numero_tomas_anteriores': sum(1 for f, _ in previas if f.year == fecha_anterior.year),
+        'acumulado_anual': cantidad_propia + sum(c for f, c in previas if f.year == fecha_propia.year),
+    }
 
 
 def _perfil_nombre(request):
@@ -3909,6 +4180,30 @@ def _obtener_estado_validacion_seccion(cursor, section_name):
     return row[0] if row and row[0] else 'ERROR'
 
 
+def _obtener_estados_ean_seccion(cursor, section_name, codigos_barras):
+    """Consulta el resultado real del EAN dentro de la sección mostrada."""
+    codigos = list(dict.fromkeys(
+        str(codigo) for codigo in codigos_barras if codigo is not None
+    ))
+    if not section_name or not codigos:
+        return []
+
+    placeholders = ', '.join(['%s'] * len(codigos))
+    cursor.execute(f"""
+        SELECT DISTINCT NVL(UPPER(be.estado), 'SIN EAN')
+        FROM barcodes_escaneo_tbl be
+        INNER JOIN sesiones_escaneo_tbl se
+            ON se.sesion_id = be.sesion_id
+        INNER JOIN procesos_escaneo_tbl pe
+            ON pe.proceso_id = se.proceso_id
+        WHERE se.section_name = %s
+          AND UPPER(pe.estado) = 'RECIBIDO'
+          AND be.codigo_barras IN ({placeholders})
+        ORDER BY 1
+    """, [section_name, *codigos])
+    return [str(row[0]).upper() for row in cursor.fetchall() if row[0]]
+
+
 @csrf_exempt
 def obtener_barcodes_escaneo_primer_conteo(request):
     """
@@ -4304,7 +4599,10 @@ def reprocesar_ean_primer_conteo(request):
         if not _puede_acceder_seccion(request, section_name):
             return _respuesta_sin_acceso()
 
-        # Eliminar ceros a la izquierda del código de barras
+        codigo_barras = str(codigo_barras).strip()
+
+        # El valor normalizado se usa para el bloqueo y para localizar el
+        # registro si el SP elimina los ceros iniciales.
         codigo_barras_limpio = codigo_barras.lstrip('0') or '0'
         clave_reprocesamiento = (codigo_barras_limpio, str(numero_conteo))
 
@@ -4325,9 +4623,10 @@ def reprocesar_ean_primer_conteo(request):
 
 
         with connection.cursor() as cursor:
-            # Ejecutar el Store Procedure sp_actualiza_ean ANTES de actualizar el código
-            print(f"▶️ Ejecutando SP sp_actualiza_ean({codigo_barras_limpio}, {numero_conteo})")
-            cursor.callproc('sp_actualiza_ean', [codigo_barras_limpio, str(numero_conteo)])
+            # El SP normaliza los ceros al consultar SAP, pero actualiza por el
+            # código original almacenado en barcodes_escaneo_tbl.
+            print(f"▶️ Ejecutando SP sp_actualiza_ean({codigo_barras}, {numero_conteo})")
+            cursor.callproc('sp_actualiza_ean', [codigo_barras, str(numero_conteo)])
 
             # Si el código tenía ceros a la izquierda, actualizar en la BD
             if codigo_barras != codigo_barras_limpio:
@@ -4345,9 +4644,33 @@ def reprocesar_ean_primer_conteo(request):
             )
             print(f"📊 Nuevo estado de validación: {nuevo_estado_validacion}")
 
+            # Que callproc termine no significa que el EAN fue validado: el SP
+            # maneja internamente NO_ENCONTRADO y ERROR_REMOTO. Comprobamos el
+            # valor persistido antes de informar éxito a la interfaz.
+            estados_ean = _obtener_estados_ean_seccion(
+                cursor,
+                section_name,
+                [codigo_barras, codigo_barras_limpio]
+            )
+            ean_validado = bool(estados_ean) and all(
+                estado == 'VALIDADO' for estado in estados_ean
+            )
+            estado_ean = (
+                'VALIDADO'
+                if ean_validado
+                else ', '.join(estados_ean) if estados_ean else 'SIN_REGISTRO'
+            )
+            print(f"📊 Estado real del EAN: {estado_ean}")
+
         return JsonResponse({
-            'success': True,
-            'message': 'EAN reprocesado correctamente',
+            'success': ean_validado,
+            'sp_ejecutado': True,
+            'message': (
+                'EAN reprocesado y validado correctamente'
+                if ean_validado
+                else f'El SP se ejecutó, pero el EAN quedó en estado {estado_ean}'
+            ),
+            'estado_ean': estado_ean,
             'nuevo_estado_validacion': nuevo_estado_validacion,
             'section_name': section_name
         })
@@ -8102,6 +8425,12 @@ def acta_final(request):
                     'message': 'Seleccione al menos un conteo para generar el acta final'
                 }, status=400)
 
+            if len(numeros_conteo) > MAX_CONTEOS_ACTA_FINAL:
+                return JsonResponse({
+                    'success': False,
+                    'message': _mensaje_exceso_conteos_acta_final(len(numeros_conteo))
+                }, status=400)
+
             placeholders = ','.join(['%s'] * len(numeros_conteo))
             with connection.cursor() as cursor:
                 cursor.execute(f"""
@@ -8317,6 +8646,7 @@ def acta_final(request):
     context = {
         'usuario': request.session['usuario'],
         'perfil': perfil_nombre,
+        'max_conteos_acta_final': MAX_CONTEOS_ACTA_FINAL,
     }
     return render(request, 'inventario/acta_final.html', context)
 
@@ -9507,6 +9837,10 @@ def formulario_acta_final(request):
     numeros_conteo = [n.strip() for n in numeros_raw.split(',') if n.strip()]
     numeros_conteo = list(dict.fromkeys(numeros_conteo))
 
+    if len(numeros_conteo) > MAX_CONTEOS_ACTA_FINAL:
+        messages.error(request, _mensaje_exceso_conteos_acta_final(len(numeros_conteo)))
+        return redirect('acta_final')
+
     try:
         placeholders = ','.join(['%s'] * len(numeros_conteo))
 
@@ -9584,7 +9918,8 @@ def formulario_acta_final(request):
                         cargo_1, nombre_cargo_1, cargo_2, nombre_cargo_2,
                         cargo_3, nombre_cargo_3, cargo_4, nombre_cargo_4,
                         cargo_5, nombre_cargo_5, cargo_6, nombre_cargo_6,
-                        cargo_7, nombre_cargo_7, cargo_8, nombre_cargo_8, sap_hcm_mcu, fecha_segundo_conteo
+                        cargo_7, nombre_cargo_7, cargo_8, nombre_cargo_8, sap_hcm_mcu, fecha_segundo_conteo,
+                        fecha_creacion
                     FROM acta_final_tbl WHERE acta_final_id = %s
                 """, [acta_final_id_existente])
                 row = cursor.fetchone()
@@ -9645,6 +9980,36 @@ def formulario_acta_final(request):
                     'sap_hcm_mcu': r[84] or '',
                     'anio_anterior': timezone.now().year - 1,
                 }
+                # Personal ejecutando y administrativo: mostrar el promedio actual de las actas preliminares
+                personal_promedio = _promedio_personal_actas_preliminares(cursor, numeros_conteo)
+                if personal_promedio:
+                    datos_conteo.update(personal_promedio)
+                # Valores de caja: promedio de los conteos
+                caja_promedio = _promedio_valores_caja(cursor, numeros_conteo)
+                if caja_promedio:
+                    datos_conteo.update(caja_promedio)
+                # Últimas facturas y documentos: del acta preliminar del último conteo
+                documentos = _documentos_ultimo_conteo(cursor, numeros_conteo)
+                if documentos:
+                    datos_conteo.update(documentos)
+                # Código de inventario: último conteo de los seleccionados (mayor piqueo_id)
+                codigo_ultimo = _codigo_inventario_ultimo_conteo(cursor, numeros_conteo)
+                if codigo_ultimo:
+                    datos_conteo['codigo_inventario'] = codigo_ultimo
+                # Toma física grupo: todos los grupos planificados de los conteos, sin repetir
+                grupos_toma = _grupos_toma_fisica(cursor, numeros_conteo)
+                if grupos_toma:
+                    datos_conteo['toma_fisica_grupo'] = grupos_toma
+                # Inventario anterior (acta final anterior de la misma tienda): fecha, cantidad y año
+                anterior = _inventario_anterior(
+                    cursor, numeros_conteo, acta_final_id_existente,
+                    fecha_creacion=r[86], cantidad_items_propia=r[35]
+                )
+                datos_conteo['fecha_toma_fisica_anterior'] = anterior['fecha'].strftime('%Y-%m-%d')
+                datos_conteo['cantidad_item_ultimo_inv'] = anterior['cantidad_items']
+                datos_conteo['anio_ultimo_inventario'] = anterior['anio']
+                datos_conteo['numero_toma_fisica_anterior'] = anterior['numero_tomas_anteriores']
+                datos_conteo['cantidad_item_acumula_anual'] = anterior['acumulado_anual']
             else:
                 def _s(v, d=0):
                     return v if v is not None else d
@@ -9686,13 +10051,15 @@ def formulario_acta_final(request):
                         ROUND(AVG(NVL(stock_sap_valor_fundas,0))),
                         ROUND(AVG(NVL(stock_sap_valor_otros,0))),
                         ROUND(AVG(NVL(stock_sap_total,0))),
-                        -- [18..25] Financiero: SUMA (cajas de cada turno)
-                        SUM(NVL(valor_efectivo,0)),
-                        SUM(NVL(valor_facturas,0)),
-                        SUM(NVL(valor_cheques,0)),
-                        SUM(NVL(fondo_caja,0)),
-                        SUM(NVL(fondo_sueltos,0)),
-                        SUM(NVL(total,0)),
+                        -- [18..23] Valores de caja: PROMEDIO de los conteos (2 decimales)
+                        --          (mismo cálculo que _promedio_valores_caja)
+                        ROUND(AVG(NVL(valor_efectivo,0)), 2),
+                        ROUND(AVG(NVL(valor_facturas,0)), 2),
+                        ROUND(AVG(NVL(valor_cheques,0)), 2),
+                        ROUND(AVG(NVL(fondo_caja,0)), 2),
+                        ROUND(AVG(NVL(fondo_sueltos,0)), 2),
+                        ROUND(AVG(NVL(total,0)), 2),
+                        -- [24..25] Gastos y horas suspendidas: SUMA
                         SUM(NVL(total_gastos_ejecucion_toma_fisica,0)),
                         SUM(NVL(horas_suspendidas_atencion_cliente,0)),
                         -- [26..27] Acumulados anuales: SUMA
@@ -9839,6 +10206,16 @@ def formulario_acta_final(request):
                 if not fecha_tercer_conteo_final and agg and agg[29]:
                     fecha_tercer_conteo_final = agg[29]
 
+                # Código de inventario: último conteo de los seleccionados (mayor piqueo_id)
+                codigo_ultimo = _codigo_inventario_ultimo_conteo(cursor, numeros_conteo)
+                # Toma física grupo: todos los grupos planificados de los conteos, sin repetir
+                grupos_toma = _grupos_toma_fisica(cursor, numeros_conteo)
+                # Fecha toma física anterior: creación del acta final anterior de la misma tienda
+                # (si no hay, la fecha de generación de esta acta = hoy y su propia cantidad de items)
+                anterior = _inventario_anterior(
+                    cursor, numeros_conteo, cantidad_items_propia=cantidad_items_final
+                )
+
                 stock_sap_total_avg = _s(agg[17], 0) if agg else 0
                 empresa_val = _s(agg[30], '') if agg else usuario_sesion.get('empresa', 'SUPERDEPORTE')
                 centro_val = _s(agg[31], '') if agg else (piqueos[0]['centro'] if piqueos else '')
@@ -9900,15 +10277,16 @@ def formulario_acta_final(request):
                     'valor_items_sobrantes': valor_items_sobrantes_final,
                     'lineas_diferencias': lineas_diferencias_final,
                     # Campos fijos del conteo más reciente [30..39] sin cambio, [41..] bajaron 1
-                    'codigo_inventario': _s(agg[36], '') if agg else '',
-                    'toma_fisica_grupo': _s(agg[37], '') if agg else '',
+                    'codigo_inventario': codigo_ultimo or (_s(agg[36], '') if agg else ''),
+                    'toma_fisica_grupo': grupos_toma or (_s(agg[37], '') if agg else ''),
                     'confirmo_encerado_guia_remi': _s(agg[38], 'NO') if agg else 'NO',
                     'sucursal': _s(agg[39], '') if agg else '',
                     'sap_hcm_mcu': '',
-                    'fecha_toma_fisica_anterior': agg[45].strftime('%Y-%m-%d') if (agg and agg[45]) else '',
-                    'cantidad_item_ultimo_inv': _s(agg[46], 0) if agg else 0,
-                    'numero_toma_fisica_anterior': _s(agg[47], '') if agg else '',
-                    # Financiero: SUMA
+                    'fecha_toma_fisica_anterior': anterior['fecha'].strftime('%Y-%m-%d'),
+                    'cantidad_item_ultimo_inv': anterior['cantidad_items'],
+                    'anio_ultimo_inventario': anterior['anio'],
+                    'numero_toma_fisica_anterior': anterior['numero_tomas_anteriores'],
+                    # Valores de caja: PROMEDIO de los conteos
                     'valor_efectivo': _s(agg[18], 0) if agg else 0,
                     'valor_facturas': _s(agg[19], 0) if agg else 0,
                     'valor_cheques': _s(agg[20], 0) if agg else 0,
@@ -9918,16 +10296,17 @@ def formulario_acta_final(request):
                     'total_gastos_ejecucion': _s(agg[24], 0) if agg else 0,
                     'horas_suspendidas_atencion': _s(agg[25], 0) if agg else 0,
                     # Acumulados: SUMA
-                    'cantidad_item_acumula_anual': _s(agg[26], 0) if agg else 0,
+                    # Acumulativo anual: actas finales de la tienda en el año, incluida esta
+                    'cantidad_item_acumula_anual': anterior['acumulado_anual'],
                     'cantidad_toma_revisada': _s(agg[27], 0) if agg else 0,
                     # Calculados
                     'porcentaje_inventariado_hoy': porcentaje,
                     'total_items_por_inventariar': total_inv,
                     # Hora SAP y últimas facturas (fijos/calculados)
                     'hora_genero_informe_inven_sap': hora_informe_sap_final.strftime('%Y-%m-%dT%H:%M') if hora_informe_sap_final else '',
-                    'ultima_fact_caja1': '', 'ultima_fact_caja2': '',
-                    'ultima_fact_caja3': '', 'ultima_fact_caja4': '', 'ultima_fact_caja5': '',
-                    'ultimo_doc_guia_remision': '', 'ultimo_doc_nota_credit': '',
+                    # Últimas facturas y documentos: del acta preliminar del último conteo
+                    **(_documentos_ultimo_conteo(cursor, numeros_conteo)
+                       or {campo: '' for campo in _CAMPOS_DOCUMENTOS_ULTIMO_CONTEO}),
                     # Cargos/Firmas (del conteo más reciente) [49..64] → [48..63]
                     'gerente_operaciones_cargo': _s(agg[48], '') if agg else '',
                     'gerente_operaciones_firma': _s(agg[49], '') if agg else '',
@@ -9987,6 +10366,12 @@ def guardar_acta_final(request):
             return JsonResponse({'success': False, 'message': 'Faltan campos obligatorios (numeros_conteo, centro, almacen)'})
 
         numeros_lista = [n.strip() for n in numeros_conteo_raw.split(',') if n.strip()]
+        cantidad_conteos = len(dict.fromkeys(numeros_lista))
+        if cantidad_conteos > MAX_CONTEOS_ACTA_FINAL:
+            return JsonResponse({
+                'success': False,
+                'message': _mensaje_exceso_conteos_acta_final(cantidad_conteos)
+            }, status=400)
 
         def get_value(key, default=None):
             val = data.get(key, default)
@@ -10025,22 +10410,57 @@ def guardar_acta_final(request):
 
         with connection.cursor() as cursor:
             acta_final_id_existente = None
-            cursor.execute("SELECT acta_final_id FROM acta_final_tbl WHERE numeros_conteo = %s", [numeros_conteo_raw])
+            fecha_creacion_existente = None
+            cursor.execute(
+                "SELECT acta_final_id, fecha_creacion FROM acta_final_tbl WHERE numeros_conteo = %s",
+                [numeros_conteo_raw]
+            )
             row = cursor.fetchone()
             if row:
                 acta_final_id_existente = row[0]
+                fecha_creacion_existente = row[1] if len(row) > 1 else None
+
+            # Personal ejecutando y administrativo: siempre el promedio de las actas preliminares
+            # (no lo enviado por el navegador)
+            personal = _promedio_personal_actas_preliminares(cursor, numeros_lista) or {
+                cargo: get_number(cargo, 0, entero=True) for cargo in _CARGOS_PERSONAL_ACTA
+            }
+            # Valores de caja: promedio de las actas preliminares (no lo enviado por el navegador)
+            caja = _promedio_valores_caja(cursor, numeros_lista) or {
+                campo: get_number(campo, 0) for campo in _CAMPOS_VALORES_CAJA
+            }
+            # Últimas facturas y documentos: del acta preliminar del último conteo
+            # (no lo enviado por el navegador; '' se guarda como NULL)
+            documentos = _documentos_ultimo_conteo(cursor, numeros_lista) or {
+                campo: (get_value(campo) or '')[:DOCUMENTOS_MAX_LEN]
+                for campo in _CAMPOS_DOCUMENTOS_ULTIMO_CONTEO
+            }
+            # Código de inventario: último conteo de los seleccionados (mayor piqueo_id)
+            codigo_inventario_val = (
+                _codigo_inventario_ultimo_conteo(cursor, numeros_lista)
+                or get_value('codigo_inventario')
+            )
+            # Toma física grupo: todos los grupos planificados de los conteos, sin repetir
+            toma_fisica_grupo_val = (
+                _grupos_toma_fisica(cursor, numeros_lista)
+                or (get_value('toma_fisica_grupo') or '')[:TOMA_FISICA_GRUPO_MAX_LEN] or None
+            )
+            # Fecha toma física anterior: creación del acta final anterior de la misma tienda
+            # (no lo enviado por el navegador)
+            # Cantidad items último inventario: la del acta final anterior (o la propia si no hay)
+            anterior = _inventario_anterior(
+                cursor, numeros_lista, acta_final_id_existente,
+                fecha_creacion=fecha_creacion_existente,
+                cantidad_items_propia=get_number('cantidad_items', 0, entero=True)
+            )
+            fecha_toma_anterior_fmt = anterior['fecha'].strftime('%Y-%m-%d')
 
             params = [
                 numeros_conteo_raw, centro_val, almacen_val,
                 get_value('empresa', 'SUPERDEPORTE'), get_value('pais', ''), get_value('concepto', ''),
                 get_value('tienda', almacen_val),
                 fecha_primer_conteo_fmt, fecha_ultimo_conteo_fmt,
-                get_number('jefe_tienda', 0, entero=True), get_number('subjefe_tienda', 0, entero=True),
-                get_number('auxiliar_ventas', 0, entero=True), get_number('auxiliar_caja', 0, entero=True),
-                get_number('auxiliar_bodega', 0, entero=True), get_number('auxiliar_operativo', 0, entero=True),
-                get_number('asistente_opertaivo_inventario', 0, entero=True), get_number('jefe_inventarios', 0, entero=True),
-                get_number('auditor_interno', 0, entero=True), get_number('contado', 0, entero=True),
-                get_number('gerente_regional', 0, entero=True), get_number('supervisor_comercial', 0, entero=True),
+                *(personal[cargo] for cargo in _CARGOS_PERSONAL_ACTA),
                 stock_sap_descripcion_calzado, stock_sap_valor_calzado,
                 stock_sap_descripcion_ropa, stock_sap_valor_ropa,
                 stock_sap_descripcion_accesorio, stock_sap_valor_accesorio,
@@ -10050,16 +10470,13 @@ def guardar_acta_final(request):
                 get_number('cantidad_items', 0, entero=True), get_number('cantidad_items_faltantes', 0, entero=True),
                 get_number('cantidad_items_sobrantes', 0, entero=True),
                 get_number('valor_items_faltantes', 0), get_number('valor_items_sobrantes', 0),
-                get_value('codigo_inventario'), get_number('lineas_diferencias', 0, entero=True),
-                get_value('toma_fisica_grupo'), get_value('confirmo_encerado_guia_remi', 'NO'),
-                fecha_toma_anterior_fmt, get_number('cantidad_item_ultimo_inv', 0, entero=True),
-                get_value('numero_toma_fisica_anterior', ''), get_number('cantidad_item_acumula_anual', 0, entero=True),
-                get_number('valor_efectivo', 0), get_number('valor_facturas', 0),
-                get_number('valor_cheques', 0), get_number('fondo_caja', 0),
-                get_number('fondo_sueltos', 0), get_number('total', 0),
-                get_value('sucursal'), get_value('ultima_fact_caja1'), get_value('ultima_fact_caja2'),
-                get_value('ultima_fact_caja3'), get_value('ultima_fact_caja4'), get_value('ultima_fact_caja5'),
-                get_value('ultimo_doc_guia_remision'), get_value('ultimo_doc_nota_credit'),
+                codigo_inventario_val, get_number('lineas_diferencias', 0, entero=True),
+                toma_fisica_grupo_val, get_value('confirmo_encerado_guia_remi', 'NO'),
+                fecha_toma_anterior_fmt, anterior['cantidad_items'],
+                str(anterior['numero_tomas_anteriores']), anterior['acumulado_anual'],
+                *(caja[campo] for campo in _CAMPOS_VALORES_CAJA),
+                get_value('sucursal'),
+                *((documentos[campo] or None) for campo in _CAMPOS_DOCUMENTOS_ULTIMO_CONTEO),
                 get_number('horas_suspendidas_atencion', 0), get_number('total_gastos_ejecucion', 0),
                 get_number('total_items_por_inventariar', 0, entero=True),
                 get_number('cantidad_toma_revisada', 0, entero=True), get_number('porcentaje_inventariado_hoy', 0),
@@ -10288,10 +10705,66 @@ def imprimir_acta_final_pdf(request, acta_final_id):
                     cargo_1, nombre_cargo_1, cargo_2, nombre_cargo_2,
                     cargo_3, nombre_cargo_3, cargo_4, nombre_cargo_4,
                     cargo_5, nombre_cargo_5, cargo_6, nombre_cargo_6,
-                    cargo_7, nombre_cargo_7, cargo_8, nombre_cargo_8, sap_hcm_mcu, fecha_segundo_conteo
+                    cargo_7, nombre_cargo_7, cargo_8, nombre_cargo_8, sap_hcm_mcu, fecha_segundo_conteo,
+                    fecha_creacion
                 FROM acta_final_tbl WHERE acta_final_id = %s
             """, [acta_final_id])
             row = cursor.fetchone()
+
+            # Fecha de segundo conteo por cada conteo del acta (orden guardado en numeros_conteo)
+            numeros_lista = []
+            fechas_segundo_por_conteo = {}
+            if row:
+                numeros_lista = list(dict.fromkeys(
+                    n.strip() for n in str(row[1] or '').split(',') if n.strip()
+                ))
+            if numeros_lista:
+                nums_ph = ','.join(['%s'] * len(numeros_lista))
+                cursor.execute(f"""
+                    SELECT numero_conteo, MAX(fecha_segundo_conteo)
+                    FROM acta_preliminar_tbl
+                    WHERE numero_conteo IN ({nums_ph})
+                    GROUP BY numero_conteo
+                """, numeros_lista)
+                fechas_segundo_por_conteo = {
+                    str(r[0]).strip(): r[1] for r in cursor.fetchall() if r[1]
+                }
+                sin_fecha = [n for n in numeros_lista if n not in fechas_segundo_por_conteo]
+                if sin_fecha:
+                    # Respaldo: fecha real del segundo conteo en la tabla de inventario
+                    sin_fecha_ph = ','.join(['%s'] * len(sin_fecha))
+                    cursor.execute(f"""
+                        SELECT numero_conteo, MAX(fecha_conteo_2)
+                        FROM inv_inventario_fisico_vs_sistema
+                        WHERE numero_conteo IN ({sin_fecha_ph})
+                        GROUP BY numero_conteo
+                    """, sin_fecha)
+                    for r in cursor.fetchall():
+                        if r[1]:
+                            fechas_segundo_por_conteo[str(r[0]).strip()] = r[1]
+
+            # Personal ejecutando y administrativo: promedio actual de las actas preliminares
+            personal_promedio = (
+                _promedio_personal_actas_preliminares(cursor, numeros_lista) if numeros_lista else None
+            )
+            # Valores de caja: promedio de las actas preliminares
+            caja_promedio = _promedio_valores_caja(cursor, numeros_lista) if numeros_lista else None
+            # Últimas facturas y documentos: del acta preliminar del último conteo
+            documentos = _documentos_ultimo_conteo(cursor, numeros_lista) if numeros_lista else None
+            # Código de inventario: último conteo de los seleccionados (mayor piqueo_id)
+            codigo_ultimo = (
+                _codigo_inventario_ultimo_conteo(cursor, numeros_lista) if numeros_lista else None
+            )
+            # Toma física grupo: todos los grupos planificados de los conteos, sin repetir
+            grupos_toma = _grupos_toma_fisica(cursor, numeros_lista) if numeros_lista else None
+            # Inventario anterior (acta final anterior de la misma tienda): fecha, cantidad y año
+            inventario_ant = (
+                _inventario_anterior(
+                    cursor, numeros_lista, acta_final_id,
+                    fecha_creacion=row[81], cantidad_items_propia=row[35]
+                )
+                if row else None
+            )
 
         if not row:
             return JsonResponse({'success': False, 'message': 'No se encontró el acta final'}, status=404)
@@ -10331,7 +10804,23 @@ def imprimir_acta_final_pdf(request, acta_final_id):
             'cargo_5': row[71], 'nombre_cargo_5': row[72], 'cargo_6': row[73], 'nombre_cargo_6': row[74],
             'cargo_7': row[75], 'nombre_cargo_7': row[76], 'cargo_8': row[77], 'nombre_cargo_8': row[78],
             'sap_hcm_mcu': row[79] or '',
+            'fecha_creacion': row[81],
         }
+        if personal_promedio:
+            datos.update(personal_promedio)
+        if caja_promedio:
+            datos.update(caja_promedio)
+        if documentos:
+            datos.update(documentos)
+        if codigo_ultimo:
+            datos['codigo_inventario'] = codigo_ultimo
+        if grupos_toma:
+            datos['toma_fisica_grupo'] = grupos_toma
+        if inventario_ant:
+            datos['fecha_toma_fisica_anterior'] = inventario_ant['fecha']
+            datos['cantidad_item_ultimo_inv'] = inventario_ant['cantidad_items']
+            datos['numero_toma_fisica_anterior'] = inventario_ant['numero_tomas_anteriores']
+            datos['cantidad_item_acumula_anual'] = inventario_ant['acumulado_anual']
 
         from reportlab.lib.colors import black
         from decimal import Decimal, InvalidOperation
@@ -10397,53 +10886,28 @@ def imprimir_acta_final_pdf(request, acta_final_id):
         draw_cell(x_izq + recuadro_w - 80, y_recuadros, 80, info_h, datos.get('almacen') or '', 7, center=True)
         y_recuadros -= info_h
 
-        # Mostrar conteos incluidos
-        conteos_label = datos.get('numeros_conteo') or ''
-        draw_cell(x_izq, y_recuadros, recuadro_w, info_h, f"Conteos: {conteos_label}", 6, center=False)
-        y_recuadros -= info_h
-
         x_der = margin + recuadro_w + 20
         y_horarios = y
+        col_fecha_w = 130
+        col_label_w = recuadro_w - col_fecha_w
 
-        # Fila cabecera: fecha de generación del acta
-        fecha_generacion = datetime.now().strftime("%A, %d de %B de %Y")
-        draw_cell(x_der, y_horarios, recuadro_w - 100, info_h, "Fecha Generación Acta:", 7, True)
-        draw_cell(x_der + recuadro_w - 100, y_horarios, 100, info_h, fecha_generacion, 7, center=True)
+        # Fecha de creación del acta (guardada en BD), no la de impresión
+        draw_cell(x_der, y_horarios, col_label_w, info_h, "Fecha Generación Acta:", 7, True)
+        draw_cell(x_der + col_label_w, y_horarios, col_fecha_w, info_h,
+                  _fecha_corta(datos.get('fecha_creacion')), 7, center=True)
+
+        # Conteos incluidos con su fecha de segundo conteo (máximo MAX_CONTEOS_ACTA_FINAL)
         y_horarios -= info_h
+        draw_cell(x_der, y_horarios, col_label_w, info_h, "CONTEOS", 7, True)
+        draw_cell(x_der + col_label_w, y_horarios, col_fecha_w, info_h, "Fecha Segundo Conteo", 7, True, True)
+        for numero in numeros_lista:
+            y_horarios -= info_h
+            draw_cell(x_der, y_horarios, col_label_w, info_h, numero, 7)
+            draw_cell(x_der + col_label_w, y_horarios, col_fecha_w, info_h,
+                      _fecha_corta(fechas_segundo_por_conteo.get(numero)), 7, center=True)
 
-        # Fecha Primer Conteo
-        fecha_1_str = ''
-        if datos.get('fecha_primer_conteo'):
-            try:
-                fecha_1_str = datos['fecha_primer_conteo'].strftime('%Y-%m-%d')
-            except Exception:
-                fecha_1_str = str(datos['fecha_primer_conteo'])[:10]
-        draw_cell(x_der, y_horarios, recuadro_w - 80, info_h, "Fecha Primer Conteo:", 7)
-        draw_cell(x_der + recuadro_w - 80, y_horarios, 80, info_h, fecha_1_str, 7, center=True)
-        y_horarios -= info_h
-
-        # Fecha Segundo Conteo
-        fecha_2_str = ''
-        if datos.get('fecha_segundo_conteo'):
-            try:
-                fecha_2_str = datos['fecha_segundo_conteo'].strftime('%Y-%m-%d')
-            except Exception:
-                fecha_2_str = str(datos['fecha_segundo_conteo'])[:10]
-        draw_cell(x_der, y_horarios, recuadro_w - 80, info_h, "Fecha Segundo Conteo:", 7)
-        draw_cell(x_der + recuadro_w - 80, y_horarios, 80, info_h, fecha_2_str, 7, center=True)
-        y_horarios -= info_h
-
-        # Fecha Tercer Conteo
-        fecha_3_str = ''
-        if datos.get('fecha_tercer_conteo'):
-            try:
-                fecha_3_str = datos['fecha_tercer_conteo'].strftime('%Y-%m-%d')
-            except Exception:
-                fecha_3_str = str(datos['fecha_tercer_conteo'])[:10]
-        draw_cell(x_der, y_horarios, recuadro_w - 80, info_h, "Fecha Tercer Conteo:", 7)
-        draw_cell(x_der + recuadro_w - 80, y_horarios, 80, info_h, fecha_3_str, 7, center=True)
-
-        y = min(y_recuadros, y_horarios) - section_gap - (3 * info_h)
+        # Se reserva el alto de 6 filas para que el resto del PDF no se mueva con <= 5 conteos
+        y = min(y_recuadros, y_horarios, y - 6 * info_h) - section_gap - (3 * info_h)
 
         tabla_w = (width - 2 * margin - 20) / 2
         x_izq = margin
@@ -10550,8 +11014,11 @@ def imprimir_acta_final_pdf(request, acta_final_id):
             draw_cell(x_der + tabla_w - 60, y_items - row_height, 60, row_height, hora_informe, 6, center=True)
             y_items -= row_height
 
-        draw_cell(x_der, y_items - row_height, tabla_w - 60, row_height, "Toma Física grupo:", 6)
-        draw_cell(x_der + tabla_w - 60, y_items - row_height, 60, row_height, datos['toma_fisica_grupo'] or '', 6, center=True)
+        # Celda de valor más ancha: puede contener varios grupos (ej. "Accesorios (A), Ropa (R), Zapatos (C)")
+        grupo_label_w = 75
+        draw_cell(x_der, y_items - row_height, grupo_label_w, row_height, "Toma Física grupo:", 6)
+        draw_cell(x_der + grupo_label_w, y_items - row_height, tabla_w - grupo_label_w, row_height,
+                  datos['toma_fisica_grupo'] or '', 6, center=True)
         y_items -= row_height
 
         y_min = min(y_stock, y_items) - 15
@@ -10560,10 +11027,14 @@ def imprimir_acta_final_pdf(request, acta_final_id):
         for item, valor in [
             ("Se confirmó encerado de guías de remisión:", datos['confirmo_encerado_guia_remi'] or 'NO'),
             ("Fecha de la toma física de inventario anterior:",
-             datos['fecha_toma_fisica_anterior'].strftime("%A, %d de %B de %Y") if datos['fecha_toma_fisica_anterior'] else ''),
-            (f"Cantidad Items toma física parcial último inventario {anio_ant}:", datos['cantidad_item_ultimo_inv'] or ''),
-            (f"Número de tomas Físicas anteriores en el año {anio_ant}:", datos['numero_toma_fisica_anterior'] or 0),
-            ("Cantidad Items toma física ACUMULATIVO ANUAL:", f"{datos['cantidad_item_acumula_anual']}"),
+             _fecha_corta(datos['fecha_toma_fisica_anterior'])),
+            (f"Cantidad Items toma física parcial último inventario "
+             f"{inventario_ant['anio'] if inventario_ant else anio_ant}:",
+             format_number(datos['cantidad_item_ultimo_inv'] or 0)),
+            (f"Número de tomas Físicas anteriores en el año "
+             f"{inventario_ant['anio'] if inventario_ant else anio_ant}:",
+             datos['numero_toma_fisica_anterior'] or 0),
+            ("Cantidad Items toma física ACUMULATIVO ANUAL:", format_number(datos['cantidad_item_acumula_anual'] or 0)),
         ]:
             draw_cell(margin, y_min - row_height, tabla_completa_w - 100, row_height, item, 6)
             draw_cell(margin + tabla_completa_w - 100, y_min - row_height, 100, row_height, str(valor), 6, center=True)

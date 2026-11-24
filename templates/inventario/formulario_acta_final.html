@@ -317,12 +317,12 @@
                                 value="{{ datos_conteo.fecha_toma_fisica_anterior }}" readonly>
                         </div>
                         <div class="form-group">
-                            <label>Cantidad Items toma física parcial último inventario {{ datos_conteo.anio_anterior }}</label>
+                            <label>Cantidad Items toma física parcial último inventario {{ datos_conteo.anio_ultimo_inventario|default:datos_conteo.anio_anterior }}</label>
                             <input type="text" class="form-control" name="cantidad_item_ultimo_inv"
                                 value="{{ datos_conteo.cantidad_item_ultimo_inv|format_number }}" readonly>
                         </div>
                         <div class="form-group">
-                            <label>Número de tomas Físicas anteriores en el año {{ datos_conteo.anio_anterior }}</label>
+                            <label>Número de tomas Físicas anteriores en el año {{ datos_conteo.anio_ultimo_inventario|default:datos_conteo.anio_anterior }}</label>
                             <input type="text" class="form-control" name="numero_toma_fisica_anterior"
                                 value="{{ datos_conteo.numero_toma_fisica_anterior }}" readonly>
                         </div>
@@ -413,45 +413,45 @@
                         </div>
                         <div class="form-group">
                             <label>Última Factura Caja 030</label>
-                            <input type="number" class="form-control" name="ultima_fact_caja1"
-                                value="{{ datos_conteo.ultima_fact_caja1 }}" min="0" step="1"
-                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                            <input type="text" class="form-control" name="ultima_fact_caja1"
+                                value="{{ datos_conteo.ultima_fact_caja1|default_if_none:'' }}" readonly
+                                title="Tomado del acta preliminar del último conteo">
                         </div>
                         <div class="form-group">
                             <label>Última Factura Caja 031</label>
-                            <input type="number" class="form-control" name="ultima_fact_caja2"
-                                value="{{ datos_conteo.ultima_fact_caja2 }}" min="0" step="1"
-                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                            <input type="text" class="form-control" name="ultima_fact_caja2"
+                                value="{{ datos_conteo.ultima_fact_caja2|default_if_none:'' }}" readonly
+                                title="Tomado del acta preliminar del último conteo">
                         </div>
                         <div class="form-group">
                             <label>Última Factura Caja 032</label>
-                            <input type="number" class="form-control" name="ultima_fact_caja3"
-                                value="{{ datos_conteo.ultima_fact_caja3 }}" min="0" step="1"
-                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                            <input type="text" class="form-control" name="ultima_fact_caja3"
+                                value="{{ datos_conteo.ultima_fact_caja3|default_if_none:'' }}" readonly
+                                title="Tomado del acta preliminar del último conteo">
                         </div>
                         <div class="form-group">
                             <label>Última Factura Caja 033</label>
-                            <input type="number" class="form-control" name="ultima_fact_caja4"
-                                value="{{ datos_conteo.ultima_fact_caja4 }}" min="0" step="1"
-                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                            <input type="text" class="form-control" name="ultima_fact_caja4"
+                                value="{{ datos_conteo.ultima_fact_caja4|default_if_none:'' }}" readonly
+                                title="Tomado del acta preliminar del último conteo">
                         </div>
                         <div class="form-group">
                             <label>Última Factura Caja 060</label>
-                            <input type="number" class="form-control" name="ultima_fact_caja5"
-                                value="{{ datos_conteo.ultima_fact_caja5 }}" min="0" step="1"
-                                inputmode="numeric" pattern="\d*" placeholder="Ej: 201679">
+                            <input type="text" class="form-control" name="ultima_fact_caja5"
+                                value="{{ datos_conteo.ultima_fact_caja5|default_if_none:'' }}" readonly
+                                title="Tomado del acta preliminar del último conteo">
                         </div>
                         <div class="form-group">
                             <label>Último Doc. Guía Remisión</label>
-                            <input type="number" class="form-control" name="ultimo_doc_guia_remision"
-                                value="{{ datos_conteo.ultimo_doc_guia_remision }}" min="0" step="1"
-                                inputmode="numeric" pattern="\d*" placeholder="Ej: 123456">
+                            <input type="text" class="form-control" name="ultimo_doc_guia_remision"
+                                value="{{ datos_conteo.ultimo_doc_guia_remision|default_if_none:'' }}" readonly
+                                title="Tomado del acta preliminar del último conteo">
                         </div>
                         <div class="form-group">
                             <label>Último Doc. Nota Crédito</label>
-                            <input type="number" class="form-control" name="ultimo_doc_nota_credit"
-                                value="{{ datos_conteo.ultimo_doc_nota_credit }}" min="0" step="1"
-                                inputmode="numeric" pattern="\d*" placeholder="Ej: 123456">
+                            <input type="text" class="form-control" name="ultimo_doc_nota_credit"
+                                value="{{ datos_conteo.ultimo_doc_nota_credit|default_if_none:'' }}" readonly
+                                title="Tomado del acta preliminar del último conteo">
                         </div>
                     </div>
                 </div>

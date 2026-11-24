@@ -180,6 +180,10 @@
 <script src="{% static 'js/dashboard.js' %}"></script>
 {% csrf_token %}
 <script>
+    const MAX_CONTEOS_ACTA_FINAL = {{ max_conteos_acta_final|default:5 }};
+    const MENSAJE_EXCESO_CONTEOS = 'Excedió el número de conteos para el acta final. Puede unificar máximo '
+        + MAX_CONTEOS_ACTA_FINAL + ' conteos.';
+
     function showLoading(message = 'Cargando...') {
         const overlay = document.getElementById('loadingOverlay');
         overlay.querySelector('p').textContent = message;
@@ -373,12 +377,27 @@
                 <td>${escapeHtml(c.almacen || '-')}</td>
             </tr>
         `).join('');
+
+        tbody.querySelectorAll('.conteo-checkbox').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const marcados = tbody.querySelectorAll('.conteo-checkbox:checked').length;
+                if (cb.checked && marcados > MAX_CONTEOS_ACTA_FINAL) {
+                    cb.checked = false;
+                    alert(MENSAJE_EXCESO_CONTEOS);
+                }
+            });
+        });
     }
 
     function generarActa() {
         const seleccionados = Array.from(document.querySelectorAll('.conteo-checkbox:checked'));
         if (seleccionados.length === 0) {
             alert('Seleccione al menos un conteo para generar el acta final.');
+            return;
+        }
+
+        if (seleccionados.length > MAX_CONTEOS_ACTA_FINAL) {
+            alert(MENSAJE_EXCESO_CONTEOS);
             return;
         }
 

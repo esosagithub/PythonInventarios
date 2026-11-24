@@ -76,6 +76,14 @@ AND EXISTS (
 )</code></td></tr>
 
       <!-- Validación -->
+      <tr><td>— (validación)</td><td>—</td><td>Máximo 5 conteos por acta final (MAX_CONTEOS_ACTA_FINAL). Se valida en la pantalla (no deja marcar el 6.º), al generar, al abrir el formulario y al guardar</td><td><code>if len(numeros_conteo) &gt; MAX_CONTEOS_ACTA_FINAL:  # 5
+    "Excedió el número máximo de conteos para el acta final:
+     puede unificar máximo 5 conteos y seleccionó N."</code></td></tr>
+      <tr><td>— (validación)</td><td>INV_PIQUEOS_INVENTARIO_TBL</td><td>Todos los conteos en estado TERCER_CONTEO y del mismo centro y almacén</td><td><code>SELECT numero_conteo, centro, almacen, estado
+FROM INV_PIQUEOS_INVENTARIO_TBL
+WHERE numero_conteo IN :numeros_conteo
+-- estado = 'TERCER_CONTEO' en todos
+-- un solo centro y un solo almacén</code></td></tr>
       <tr><td>— (validación)</td><td>ACTA_PRELIMINAR_TBL</td><td>Validar que todos los conteos seleccionados tienen acta preliminar</td><td><code>SELECT numero_conteo FROM acta_preliminar_tbl
 WHERE numero_conteo IN :numeros_conteo</code></td></tr>
 
@@ -97,51 +105,85 @@ FROM acta_preliminar_tbl CROSS JOIN (SELECT MAX(piqueo_id) max_pid ...)</code></
       <tr><td>CONCEPTO</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN concepto END)</code></td></tr>
       <tr><td>TIENDA</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN tienda END)</code></td></tr>
       <tr><td>SUCURSAL</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN sucursal END)</code></td></tr>
-      <tr><td>SAP_HCM_MCU</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN sap_hcm_mcu END)</code></td></tr>
-      <tr><td>CODIGO_INVENTARIO</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN codigo_inventario END)</code></td></tr>
-      <tr><td>TOMA_FISICA_GRUPO</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN toma_fisica_grupo END)</code></td></tr>
+      <tr><td>SAP_HCM_MCU</td><td>ACTA_FINAL_TBL</td><td>Formulario — ACTA_PRELIMINAR_TBL no tiene esta columna; en un acta nueva arranca vacío</td><td><code>data['sap_hcm_mcu']</code></td></tr>
+      <tr><td>CODIGO_INVENTARIO</td><td>ACTA_FINAL_TBL</td><td>ÚLTIMO CONTEO de los seleccionados (el creado más recientemente, mayor piqueo_id) — se recalcula al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT numero_conteo FROM (
+    SELECT numero_conteo
+    FROM INV_PIQUEOS_INVENTARIO_TBL
+    WHERE numero_conteo IN :numeros_conteo
+    ORDER BY piqueo_id DESC
+) WHERE ROWNUM = 1
+-- Ej.: E2001YBSA1TP000009 (piqueo 736) &gt; ...000008 (728) &gt; ...000006 (698)</code></td></tr>
+      <tr><td>TOMA_FISICA_GRUPO</td><td>ACTA_FINAL_TBL</td><td>TODOS los grupos planificados de los conteos seleccionados, sin repetir, en orden alfabético y separados por coma (cada grupo distinto tal cual; "Todos (A,C,R)" no reemplaza a los demás). Máximo 100 caracteres (tamaño de la columna). Se recalcula al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT DISTINCT d.grupo_articulos
+FROM INV_PIQUEOS_INVENTARIO_TBL p
+JOIN inv_detalle_piqueos_inventarios_tbl d ON d.piqueo_id = p.piqueo_id
+WHERE p.numero_conteo IN :numeros_conteo
+  AND d.grupo_articulos IS NOT NULL
+ORDER BY d.grupo_articulos
+-- Resultado: ', '.join(grupos)
+-- Ej. acta 61: ...06 Zapatos (C), ...08 Ropa (R), ...09 Accesorios (A)
+--   → "Accesorios (A), Ropa (R), Zapatos (C)"</code></td></tr>
       <tr><td>CONFIRMO_ENCERADO_GUIA_REMI</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN confirmo_encerado_guia_remi END)</code></td></tr>
 
       <!-- Fechas -->
       <tr><td>FECHA_PRIMER_CONTEO</td><td>ACTA_FINAL_TBL</td><td>MIN — la más antigua entre todos los conteos</td><td><code>SELECT MIN(fecha_primer_conteo)
 FROM acta_preliminar_tbl
 WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>FECHA_ULTIMO_CONTEO</td><td>ACTA_FINAL_TBL</td><td>MAX — la más reciente; primero desde INV si hay obs4, si no desde AP</td><td><code>-- Si hay conteos con obs4:
-SELECT MAX(fecha_conteo_4) FROM inv_inventario_fisico_vs_sistema
+      <tr><td>FECHA_ULTIMO_CONTEO</td><td>ACTA_FINAL_TBL</td><td>MAX — fecha del tercer conteo desde INV (todos los conteos); si es nula, MAX fecha de segundo conteo desde AP</td><td><code>SELECT MAX(fecha_conteo_4) FROM inv_inventario_fisico_vs_sistema
 WHERE numero_conteo IN :numeros_conteo
--- Si no hay ninguno con obs4 (fallback):
+-- Si el resultado es NULL (respaldo):
 SELECT MAX(fecha_segundo_conteo) FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td></tr>
+      <tr><td>FECHA_SEGUNDO_CONTEO</td><td>ACTA_FINAL_TBL</td><td>MAX — desde INV (todos los conteos)</td><td><code>SELECT MAX(fecha_conteo_2)
+FROM inv_inventario_fisico_vs_sistema
 WHERE numero_conteo IN :numeros_conteo</code></td></tr>
       <tr><td>HORA_GENERO_INFORME_INVEN_SAP</td><td>ACTA_FINAL_TBL</td><td>MAX — desde INV (todos los conteos)</td><td><code>SELECT MAX(fecha_precio)
 FROM inv_inventario_fisico_vs_sistema
 WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>FECHA_TOMA_FISICA_ANTERIOR</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN fecha_toma_fisica_anterior END)</code></td></tr>
+      <tr><td>FECHA_TOMA_FISICA_ANTERIOR</td><td>ACTA_FINAL_TBL</td><td>FECHA DE CREACIÓN del último acta final generado ANTES de esta para la MISMA TIENDA (centro_costo de los conteos en INV_PIQUEOS_INVENTARIO_TBL; no se usan centro/almacén de ACTA_FINAL_TBL porque tienen datos inconsistentes). Si la tienda no tiene acta final anterior, se usa la fecha de generación de esta misma acta. Se recalcula al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>-- 1) Tienda de los conteos
+SELECT DISTINCT centro_costo FROM INV_PIQUEOS_INVENTARIO_TBL
+WHERE numero_conteo IN :numeros_conteo AND centro_costo IS NOT NULL
+-- 2) Todas las actas finales anteriores de esa tienda (_inventario_anterior, fetchall)
+SELECT af.fecha_creacion, af.cantidad_items
+FROM acta_final_tbl af
+WHERE af.acta_final_id &lt;&gt; :acta_final_id            -- -1 si es nueva
+  AND af.fecha_creacion &lt; :fecha_creacion_de_esta_acta  -- SYSDATE si es nueva
+  AND EXISTS (SELECT 1 FROM INV_PIQUEOS_INVENTARIO_TBL p
+              WHERE p.centro_costo IN :tiendas
+                AND INSTR(',' || af.numeros_conteo || ',', ',' || p.numero_conteo || ',') &gt; 0)
+ORDER BY af.fecha_creacion DESC
+-- En Python (cantidades normalizadas: 2.385 → 2385):
+--   la primera fila (la más reciente) da FECHA_TOMA_FISICA_ANTERIOR y CANTIDAD_ITEM_ULTIMO_INV;
+--   NUMERO_TOMA_FISICA_ANTERIOR = filas del año de esa acta;
+--   CANTIDAD_ITEM_ACUMULA_ANUAL = esta acta + filas del año de esta acta
+-- 3) Sin anterior → fecha_creacion de esta acta (hoy si aún no existe)
+-- Ej.: acta 61 (E2001YBSA1) → acta 23 creada 24/06/2026 → 24/06/2026
+--      acta 23 (primera de la tienda) → su propia creación 24/06/2026</code></td></tr>
 
       <!-- Personal -->
-      <tr><td>JEFE_TIENDA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO — misma persona en distintos turnos</td><td><code>SELECT ROUND(AVG(NVL(jefe_tienda,0)))
+      <tr><td>JEFE_TIENDA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(jefe_tienda,0)))
 FROM acta_preliminar_tbl
 WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>SUBJEFE_TIENDA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(subjefe_tienda,0)))
+      <tr><td>SUBJEFE_TIENDA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(subjefe_tienda,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>AUXILIAR_VENTAS</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_ventas,0)))
+      <tr><td>AUXILIAR_VENTAS</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_ventas,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>AUXILIAR_CAJA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_caja,0)))
+      <tr><td>AUXILIAR_CAJA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_caja,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>AUXILIAR_BODEGA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_bodega,0)))
+      <tr><td>AUXILIAR_BODEGA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_bodega,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>AUXILIAR_OPERATIVO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_operativo,0)))
+      <tr><td>AUXILIAR_OPERATIVO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(auxiliar_operativo,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>ASISTENTE_OPERTAIVO_INVENTARIO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(asistente_opertaivo_inventario,0)))
+      <tr><td>ASISTENTE_OPERTAIVO_INVENTARIO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(asistente_opertaivo_inventario,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>JEFE_INVENTARIOS</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(jefe_inventarios,0)))
+      <tr><td>JEFE_INVENTARIOS</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(jefe_inventarios,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>AUDITOR_INTERNO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(auditor_interno,0)))
+      <tr><td>AUDITOR_INTERNO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(auditor_interno,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>CONTADO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(contado,0)))
+      <tr><td>CONTADO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(contado,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>GERENTE_REGIONAL</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(gerente_regional,0)))
+      <tr><td>GERENTE_REGIONAL</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(gerente_regional,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>SUPERVISOR_COMERCIAL</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO</td><td><code>SELECT ROUND(AVG(NVL(supervisor_comercial,0)))
+      <tr><td>SUPERVISOR_COMERCIAL</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (entero) — se recalcula desde ACTA_PRELIMINAR_TBL al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(supervisor_comercial,0)))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
 
       <!-- Stock SAP -->
@@ -205,11 +247,21 @@ FROM inv_inventario_fisico_vs_sistema WHERE numero_conteo IN :conteos_con_obs4</
       <tr><td>LINEAS_DIFERENCIAS</td><td>ACTA_FINAL_TBL</td><td>Inventario físico — todos los conteos consolidados</td><td><code>SELECT COUNT(CASE WHEN estado_comparacion_4='FALTANTE' THEN diferencia_4 END) + ABS(COUNT(CASE WHEN estado_comparacion_4='SOBRANTE' THEN diferencia_4 END)) FROM inv_inventario_fisico_vs_sistema WHERE numero_conteo IN :numeros_conteo</code></td></tr>
 
       <!-- Acumulados -->
-      <tr><td>CANTIDAD_ITEM_ULTIMO_INV</td><td>ACTA_FINAL_TBL</td><td>FIJO — referencia histórica del inventario anterior (mismo valor en todos los conteos)</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN cantidad_item_ultimo_inv END)
-FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>NUMERO_TOMA_FISICA_ANTERIOR</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN numero_toma_fisica_anterior END)</code></td></tr>
-      <tr><td>CANTIDAD_ITEM_ACUMULA_ANUAL</td><td>ACTA_FINAL_TBL</td><td>SUMA — acumulado de todas las tomas del año</td><td><code>SELECT SUM(NVL(cantidad_item_acumula_anual,0))
-FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
+      <tr><td>CANTIDAD_ITEM_ULTIMO_INV</td><td>ACTA_FINAL_TBL</td><td>CANTIDAD ITEMS del último acta final generado ANTES de esta para la MISMA TIENDA (la misma acta anterior que da FECHA_TOMA_FISICA_ANTERIOR). Si la tienda no tiene acta final anterior, se usa la Cantidad ITEMS de esta misma acta. El valor se normaliza como entero: el acta 23 tiene guardado 2.385 (decimal por un guardado antiguo) y se interpreta como 2385. Se recalcula al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>-- Misma consulta que FECHA_TOMA_FISICA_ANTERIOR (_inventario_anterior): fila más reciente
+-- cantidad = _parse_numero_formateado(str(cantidad_items), entero=True)
+-- Sin anterior → cantidad_items de esta acta
+-- Ej.: acta 61 → acta 23 → 2.385   |   acta 45 → acta 44 → 8.754
+--      acta 23 / 44 (primeras de su tienda) → su propia cantidad</code></td></tr>
+      <tr><td>NUMERO_TOMA_FISICA_ANTERIOR</td><td>ACTA_FINAL_TBL</td><td>CUÁNTAS ACTAS FINALES tuvo la MISMA TIENDA antes de esta, en el año del acta anterior (el mismo año que se muestra en la etiqueta). Si la tienda no tiene acta final anterior → 0. Se guarda como texto (la columna es VARCHAR). Se recalcula al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>-- Misma consulta que FECHA_TOMA_FISICA_ANTERIOR (_inventario_anterior):
+-- cuántas de las actas anteriores son del mismo año que la más reciente
+-- Ej.: acta 61 → solo la 23 (2026) → 1   |   acta 45 → solo la 44 (2026) → 1
+--      acta 23 / 44 (primeras de su tienda) → 0</code></td></tr>
+      <tr><td>CANTIDAD_ITEM_ACUMULA_ANUAL</td><td>ACTA_FINAL_TBL</td><td>SUMA de la Cantidad ITEMS de las actas finales de la MISMA TIENDA en el AÑO DE ESTA ACTA, INCLUIDA ESTA. Las cantidades se normalizan como entero (acta 23: 2.385 → 2385), por eso se suma en Python y no con SUM en SQL. Se recalcula al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>-- Misma consulta que FECHA_TOMA_FISICA_ANTERIOR (_inventario_anterior):
+acumulado = cantidad_items de esta acta
+          + SUM(cantidad_items de las actas anteriores de la tienda
+                cuyo año = año de esta acta)
+-- Ej.: acta 61 (2026) → 23 (2.385) + 61 (9.676) = 12.061
+--      acta 45 → 44 (8.754) + 45 (0) = 8.754   |   acta 23 → 2.385 (solo la propia)</code></td></tr>
       <tr><td>CANTIDAD_TOMA_REVISADA</td><td>ACTA_FINAL_TBL</td><td>SUMA — total revisado en todos los conteos</td><td><code>SELECT SUM(NVL(cantidad_toma_revisada,0))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
 
@@ -217,28 +269,37 @@ FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
       <tr><td>PORCENTAJE_INVENTARIO</td><td>ACTA_FINAL_TBL</td><td>Cálculo Python con valores finales consolidados</td><td><code>(CANTIDAD_ITEMS_total / STOCK_SAP_TOTAL_promedio) * 100</code></td></tr>
       <tr><td>TOTAL_ITEMS_POR_INVENTARIAR</td><td>ACTA_FINAL_TBL</td><td>Cálculo Python</td><td><code>MAX(0, STOCK_SAP_TOTAL_promedio - CANTIDAD_ITEMS_total)</code></td></tr>
 
-      <!-- Financiero -->
-      <tr><td>VALOR_EFECTIVO</td><td>ACTA_FINAL_TBL</td><td>SUMA — cajas de cada turno</td><td><code>SELECT SUM(NVL(valor_efectivo,0))
+      <!-- Valores de caja -->
+      <tr><td>VALOR_EFECTIVO</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (2 decimales) de las actas preliminares de los conteos seleccionados. Se recalcula al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ROUND(AVG(NVL(valor_efectivo,0)), 2)
+FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo
+-- _promedio_valores_caja(); Ej. acta 61: (97,50 + 100,00 + 60,00) / 3 = 85,83</code></td></tr>
+      <tr><td>VALOR_FACTURAS</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (2 decimales), misma regla que VALOR_EFECTIVO</td><td><code>SELECT ROUND(AVG(NVL(valor_facturas,0)), 2)
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>VALOR_FACTURAS</td><td>ACTA_FINAL_TBL</td><td>SUMA</td><td><code>SELECT SUM(NVL(valor_facturas,0))
+      <tr><td>VALOR_CHEQUES</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (2 decimales), misma regla que VALOR_EFECTIVO</td><td><code>SELECT ROUND(AVG(NVL(valor_cheques,0)), 2)
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>VALOR_CHEQUES</td><td>ACTA_FINAL_TBL</td><td>SUMA</td><td><code>SELECT SUM(NVL(valor_cheques,0))
+      <tr><td>FONDO_CAJA</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (2 decimales), misma regla que VALOR_EFECTIVO</td><td><code>SELECT ROUND(AVG(NVL(fondo_caja,0)), 2)
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>FONDO_CAJA</td><td>ACTA_FINAL_TBL</td><td>SUMA</td><td><code>SELECT SUM(NVL(fondo_caja,0))
+      <tr><td>FONDO_SUELTOS</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (2 decimales), misma regla que VALOR_EFECTIVO</td><td><code>SELECT ROUND(AVG(NVL(fondo_sueltos,0)), 2)
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>FONDO_SUELTOS</td><td>ACTA_FINAL_TBL</td><td>SUMA</td><td><code>SELECT SUM(NVL(fondo_sueltos,0))
-FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
-      <tr><td>TOTAL</td><td>ACTA_FINAL_TBL</td><td>SUMA</td><td><code>SELECT SUM(NVL(total,0))
-FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
+      <tr><td>TOTAL</td><td>ACTA_FINAL_TBL</td><td>PROMEDIO (2 decimales) del TOTAL de cada acta preliminar, misma regla que VALOR_EFECTIVO. Por el redondeo a 2 decimales puede diferir en 0,01 de la suma de los promedios de cada línea</td><td><code>SELECT ROUND(AVG(NVL(total,0)), 2)
+FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo
+-- Ej. acta 61: (250 + 250 + 250) / 3 = 250,00</code></td></tr>
       <tr><td>HORAS_SUSPENDIDAS_ATENCION_CLIENTE</td><td>ACTA_FINAL_TBL</td><td>SUMA — horas totales suspendidas</td><td><code>SELECT SUM(NVL(horas_suspendidas_atencion_cliente,0))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
       <tr><td>TOTAL_GASTOS_EJECUCION_TOMA_FISICA</td><td>ACTA_FINAL_TBL</td><td>SUMA — gastos de todos los turnos</td><td><code>SELECT SUM(NVL(total_gastos_ejecucion_toma_fisica,0))
 FROM acta_preliminar_tbl WHERE numero_conteo IN :numeros_conteo</code></td></tr>
 
-      <!-- Últimas facturas -->
-      <tr><td>ULTIMA_FACT_CAJA1 .. CAJA5</td><td>ACTA_FINAL_TBL</td><td>Formulario — ingresado manualmente</td><td><code>data['ultima_fact_caja1'] .. data['ultima_fact_caja5']</code></td></tr>
-      <tr><td>ULTIMO_DOC_GUIA_REMISION</td><td>ACTA_FINAL_TBL</td><td>Formulario</td><td><code>data['ultimo_doc_guia_remision']</code></td></tr>
-      <tr><td>ULTIMO_DOC_NOTA_CREDIT</td><td>ACTA_FINAL_TBL</td><td>Formulario</td><td><code>data['ultimo_doc_nota_credit']</code></td></tr>
+      <!-- Últimas facturas y documentos -->
+      <tr><td>ULTIMA_FACT_CAJA1 .. CAJA5<br>ULTIMO_DOC_GUIA_REMISION<br>ULTIMO_DOC_NOTA_CREDIT</td><td>ACTA_FINAL_TBL</td><td>ÚLTIMO CONTEO — se copian del acta preliminar del último conteo de los seleccionados (el creado más recientemente, mayor piqueo_id; mismo criterio que CODIGO_INVENTARIO). Si ese conteo tiene un campo vacío, queda vacío. Se recortan a 50 caracteres (VARCHAR2(50)). En el formulario son de solo lectura. Se recalculan al guardar, al imprimir el PDF y al abrir un acta existente; el valor enviado por el navegador se ignora</td><td><code>SELECT ultima_fact_caja1, ultima_fact_caja2, ultima_fact_caja3,
+       ultima_fact_caja4, ultima_fact_caja5,
+       ultimo_doc_guia_remision, ultimo_doc_nota_credit
+FROM (SELECT ... FROM acta_preliminar_tbl
+      WHERE numero_conteo IN :numeros_conteo
+      ORDER BY piqueo_id DESC)
+WHERE ROWNUM = 1
+-- _documentos_ultimo_conteo()
+-- Ej. acta 61 → conteo ...09 (piqueo 736): caja1 035030000083052, caja2 035031000145459,
+--     guía 035030000001030, nota de crédito 035031000003551</code></td></tr>
 
       <!-- Cargos y firmas -->
       <tr><td>CARGO_1 / NOMBRE_CARGO_1</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>MAX(CASE WHEN piqueo_id = max_pid THEN cargo_1 END)  -- gerente_operaciones_cargo
@@ -252,9 +313,86 @@ MAX(CASE WHEN piqueo_id = max_pid THEN nombre_cargo_1 END)  -- gerente_operacion
       <tr><td>CARGO_8 / NOMBRE_CARGO_8</td><td>ACTA_FINAL_TBL</td><td>FIJO — del conteo más reciente</td><td><code>auditor_interno_cargo / auditor_interno_firma</code></td></tr>
 
       <!-- Estado final -->
+      <tr><td>FECHA_CREACION</td><td>ACTA_FINAL_TBL</td><td>Automática al insertar (DEFAULT SYSDATE de la columna); el UPDATE al volver a guardar no la modifica</td><td><code>FECHA_CREACION DATE DEFAULT SYSDATE</code></td></tr>
+      <tr><td>USUARIO_CREACION</td><td>ACTA_FINAL_TBL</td><td>Cédula del usuario en sesión al insertar</td><td><code>request.session['usuario']['cedula']</code></td></tr>
       <tr><td>ESTADO</td><td>ACTA_FINAL_TBL</td><td>Fijo al insertar</td><td><code>'ACTIVO'</code></td></tr>
       <tr><td>ESTADO</td><td>INV_PIQUEOS_INVENTARIO_TBL</td><td>Actualización posterior al guardar</td><td><code>UPDATE INV_PIQUEOS_INVENTARIO_TBL SET estado = 'ACTA_TOMA_FISICA'
 WHERE numero_conteo IN :numeros_conteo</code></td></tr>
+    </tbody>
+  </table>
+
+  <h1 style="margin-top:32px;">PDF del Acta Final (imprimir_acta_final_pdf)</h1>
+  <p>Qué muestra el encabezado del PDF y de dónde sale cada dato. Las demás secciones del PDF usan los valores guardados en ACTA_FINAL_TBL.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Sección / dato del PDF</th>
+        <th>Tabla origen</th>
+        <th>Regla</th>
+        <th>SQL / lógica usada</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Recuadro izquierdo</td><td>ACTA_FINAL_TBL</td><td>PAÍS, EMPRESA, CONCEPTO, CENTRO, ALMACÉN. Los conteos ya no se listan aquí</td><td><code>pais, empresa, concepto, centro, almacen</code></td></tr>
+      <tr><td>Fecha Generación Acta</td><td>ACTA_FINAL_TBL</td><td>Fecha en que se creó el acta (no la fecha de impresión), formato dd/mm/aaaa</td><td><code>SELECT fecha_creacion FROM acta_final_tbl
+WHERE acta_final_id = :acta_final_id</code></td></tr>
+      <tr><td>CONTEOS / Fecha Segundo Conteo</td><td>ACTA_PRELIMINAR_TBL (respaldo INV_INVENTARIO_FISICO_VS_SISTEMA)</td><td>Una fila por conteo, en el orden guardado en NUMEROS_CONTEO (máximo 5), con su propia fecha de segundo conteo en dd/mm/aaaa. Reemplaza las filas de Fecha Primer/Segundo/Tercer Conteo consolidadas</td><td><code>SELECT numero_conteo, MAX(fecha_segundo_conteo)
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo
+GROUP BY numero_conteo
+-- Conteos sin fecha en AP (respaldo):
+SELECT numero_conteo, MAX(fecha_conteo_2)
+FROM inv_inventario_fisico_vs_sistema
+WHERE numero_conteo IN :conteos_sin_fecha
+GROUP BY numero_conteo</code></td></tr>
+      <tr><td>Personal ejecutando Toma Física</td><td>ACTA_PRELIMINAR_TBL</td><td>PROMEDIO por cargo, redondeado a entero, calculado al imprimir. Si ningún conteo tiene acta preliminar, se usa lo guardado en ACTA_FINAL_TBL</td><td><code>SELECT COUNT(*),
+       ROUND(AVG(NVL(jefe_tienda,0))),
+       ROUND(AVG(NVL(subjefe_tienda,0))),
+       ROUND(AVG(NVL(auxiliar_ventas,0))),
+       ROUND(AVG(NVL(auxiliar_caja,0))),
+       ROUND(AVG(NVL(auxiliar_bodega,0))),
+       ROUND(AVG(NVL(auxiliar_operativo,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo
+-- Ej.: auxiliar_ventas 9, 9, 7 → 8,33 → 8</code></td></tr>
+      <tr><td>Personal Administrativo presente</td><td>ACTA_PRELIMINAR_TBL</td><td>PROMEDIO por cargo, redondeado a entero, calculado al imprimir (misma consulta que el personal ejecutando). Si ningún conteo tiene acta preliminar, se usa lo guardado en ACTA_FINAL_TBL</td><td><code>SELECT ROUND(AVG(NVL(asistente_opertaivo_inventario,0))),
+       ROUND(AVG(NVL(jefe_inventarios,0))),
+       ROUND(AVG(NVL(auditor_interno,0))),
+       ROUND(AVG(NVL(contado,0))),
+       ROUND(AVG(NVL(gerente_regional,0))),
+       ROUND(AVG(NVL(supervisor_comercial,0)))
+FROM acta_preliminar_tbl
+WHERE numero_conteo IN :numeros_conteo</code></td></tr>
+      <tr><td>Items inventariados — Código de inventario</td><td>INV_PIQUEOS_INVENTARIO_TBL</td><td>Último conteo de los seleccionados (mayor piqueo_id), calculado al imprimir. Si no encuentra los conteos, se usa lo guardado en ACTA_FINAL_TBL</td><td><code>SELECT numero_conteo FROM (
+    SELECT numero_conteo
+    FROM INV_PIQUEOS_INVENTARIO_TBL
+    WHERE numero_conteo IN :numeros_conteo
+    ORDER BY piqueo_id DESC
+) WHERE ROWNUM = 1</code></td></tr>
+      <tr><td>Fecha de la toma física de inventario anterior</td><td>ACTA_FINAL_TBL + INV_PIQUEOS_INVENTARIO_TBL</td><td>Fecha de creación del último acta final anterior de la misma tienda; si no hay, la fecha de generación de esta acta. Calculada al imprimir, formato dd/mm/aaaa</td><td><code>_inventario_anterior(cursor, numeros_conteo, acta_final_id, fecha_creacion, cantidad_items)['fecha']
+-- misma regla que FECHA_TOMA_FISICA_ANTERIOR</code></td></tr>
+      <tr><td>Cantidad Items toma física parcial último inventario &lt;año&gt;</td><td>ACTA_FINAL_TBL + INV_PIQUEOS_INVENTARIO_TBL</td><td>Cantidad ITEMS del último acta final anterior de la misma tienda; si no hay, la de esta acta. Se muestra con separador de miles (2.385). El año de la etiqueta es el del acta anterior (o el de esta acta si no hay anterior); antes era siempre el año actual menos 1</td><td><code>anterior = _inventario_anterior(cursor, numeros_conteo, acta_final_id, fecha_creacion, cantidad_items)
+etiqueta = f"Cantidad Items toma física parcial último inventario {anterior['anio']}:"
+valor    = format_number(anterior['cantidad_items'])
+-- Ej. acta 61: "... último inventario 2026:"  2.385</code></td></tr>
+      <tr><td>Número de tomas Físicas anteriores en el año &lt;año&gt;</td><td>ACTA_FINAL_TBL + INV_PIQUEOS_INVENTARIO_TBL</td><td>Cuántas actas finales tuvo la misma tienda antes de esta, en el año del acta anterior; 0 si no hay. El año de la etiqueta es el del acta anterior (o el de esta acta si no hay anterior); antes era siempre el año actual menos 1</td><td><code>etiqueta = f"Número de tomas Físicas anteriores en el año {anterior['anio']}:"
+valor    = anterior['numero_tomas_anteriores']
+-- Ej. acta 61: "... en el año 2026:"  1</code></td></tr>
+      <tr><td>Cantidad Items toma física ACUMULATIVO ANUAL</td><td>ACTA_FINAL_TBL + INV_PIQUEOS_INVENTARIO_TBL</td><td>Cantidad ITEMS de las actas finales de la misma tienda en el año de esta acta, incluida esta. Calculado al imprimir; se muestra con separador de miles</td><td><code>valor = format_number(anterior['acumulado_anual'])
+-- Ej. acta 61: 2.385 + 9.676 = 12.061</code></td></tr>
+      <tr><td>VALORES DE CAJA (Efectivo, Facturas, Cheques, Fondo de Caja, Fondo de Sueltos, TOTAL)</td><td>ACTA_PRELIMINAR_TBL</td><td>PROMEDIO de las actas preliminares de los conteos, calculado al imprimir. Si ningún conteo tiene acta preliminar, se usa lo guardado en ACTA_FINAL_TBL. Se muestran sin decimales ($86)</td><td><code>caja = _promedio_valores_caja(cursor, numeros_conteo)
+-- SELECT ROUND(AVG(NVL(&lt;campo&gt;,0)), 2) ... FROM acta_preliminar_tbl
+-- Ej. acta 61: Efectivo $86, Facturas $67, Cheques $0, Fondo de Caja $25,
+--              Fondo de Sueltos $72, TOTAL $250</code></td></tr>
+      <tr><td>Última factura de venta (caja1..caja5) y Último número documento (Guía Remisión, Nota Crédito)</td><td>ACTA_PRELIMINAR_TBL</td><td>Datos del acta preliminar del último conteo (mayor piqueo_id), calculados al imprimir. Si ningún conteo tiene acta preliminar, se usa lo guardado en ACTA_FINAL_TBL</td><td><code>documentos = _documentos_ultimo_conteo(cursor, numeros_conteo)
+-- misma regla que ULTIMA_FACT_CAJA1..5 / ULTIMO_DOC_*</code></td></tr>
+      <tr><td>Items inventariados — Toma Física grupo</td><td>INV_DETALLE_PIQUEOS_INVENTARIOS_TBL</td><td>Todos los grupos planificados de los conteos, sin repetir, en orden alfabético, calculado al imprimir. La celda del valor es más ancha para que quepan varios grupos. Si no hay grupos planificados, se usa lo guardado en ACTA_FINAL_TBL</td><td><code>SELECT DISTINCT d.grupo_articulos
+FROM INV_PIQUEOS_INVENTARIO_TBL p
+JOIN inv_detalle_piqueos_inventarios_tbl d ON d.piqueo_id = p.piqueo_id
+WHERE p.numero_conteo IN :numeros_conteo
+  AND d.grupo_articulos IS NOT NULL
+ORDER BY d.grupo_articulos</code></td></tr>
     </tbody>
   </table>
 </body>
