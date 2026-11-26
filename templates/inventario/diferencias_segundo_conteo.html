@@ -36,6 +36,19 @@
                         <span>Dashboard</span>
                     </a>
                 </li>
+                {% if solo_lectura %}
+                <li class="menu-item active">
+                    <a href="{% url 'administracion_conteo' %}">
+                        <span>Administración de Conteo</span>
+                    </a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'tercer_conteo' %}"><span>Tercer Conteo</span></a>
+                </li>
+                <li class="menu-item">
+                    <a href="{% url 'acta_final' %}"><span>Acta Final</span></a>
+                </li>
+                {% endif %}
             </ul>
         </nav>
         
@@ -50,7 +63,7 @@
     <div class="main-content" id="mainContent">
         <div class="content-header">
             <h1>Diferencias - Segundo Conteo</h1>
-            <p>Asignación de colaboradores para revisión de diferencias</p>
+            <p>{% if solo_lectura %}Consulta de estadísticas y diferencias por colaborador{% else %}Asignación de colaboradores para revisión de diferencias{% endif %}</p>
         </div>
 
         <!-- Datos principales del conteo -->
@@ -94,7 +107,11 @@
                             inputmode="numeric" placeholder="Buscar EAN"
                             style="min-width:180px;">
                     </div>
-                    <button class="btn btn-redistribuir" type="button" onclick="abrirModalRedistribuir()">
+                    <button class="btn btn-redistribuir{% if solo_lectura %} btn-disabled{% endif %}"
+                        type="button"
+                        title="{% if solo_lectura %}Acción bloqueada para el administrador{% else %}Redistribuir colaboradores{% endif %}"
+                        onclick="abrirModalRedistribuir()"
+                        {% if solo_lectura %}disabled aria-disabled="true"{% endif %}>
                         <i class="fas fa-random"></i>
                         Redistribuir
                     </button>
@@ -345,6 +362,9 @@ function getCookie(name) {
 
 // ========== FUNCIONES DEL MODAL ==========
 function abrirModalAsignarColaborador(codigoBarras, descripcion, diferenciaId) {
+    if ({{ solo_lectura|yesno:"true,false" }}) {
+        return;
+    }
     codigoBarrasSeleccionado = codigoBarras;
     diferenciaIdSeleccionada = diferenciaId;  // ⭐ USAR EL ID ÚNICO
     
@@ -864,6 +884,9 @@ function renderCollaboratorStatsTable(stats) {
 }
 
 function abrirModalRedistribuir() {
+    if ({{ solo_lectura|yesno:"true,false" }}) {
+        return;
+    }
     const modal = document.getElementById('modalRedistribuir');
     if (!modal) return;
 
@@ -1764,8 +1787,20 @@ function guardarDiferencia(button) {
     justify-content: center;
 }
 
-.btn-redistribuir:hover {
+.btn-redistribuir:hover:not(:disabled) {
     background: #073a7b;
+}
+
+.btn-redistribuir:disabled,
+.btn-redistribuir.btn-disabled {
+    background: #9ca3af !important;
+    border-color: #9ca3af !important;
+    color: #f3f4f6 !important;
+    cursor: not-allowed !important;
+    opacity: 0.65 !important;
+    pointer-events: none !important;
+    transform: none !important;
+    box-shadow: none !important;
 }
 
 .btn-auditoria {

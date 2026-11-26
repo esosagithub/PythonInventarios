@@ -18,11 +18,12 @@ if __name__ == '__main__':
     # Configuración del servidor
     host = '0.0.0.0'  # Escucha en todas las interfaces
     port = 3004       # Puerto de la aplicación
-    threads = 4       # Número de threads para manejar solicitudes
+    threads = 8       # Número de threads para manejar solicitudes
     
-    print(f"Iniciando servidor Waitress en http://{host}:{port}")
-    print(f"Usando {threads} threads")
-    print("Presiona CTRL+C para detener el servidor")
+    print(f"Iniciando servidor Waitress en http://{host}:{port}", flush=True)
+    print(f"Monitor disponible en http://localhost:{port}/monitor/", flush=True)
+    print(f"Usando {threads} threads", flush=True)
+    print("Presiona CTRL+C para detener el servidor", flush=True)
     
     serve(
         application,

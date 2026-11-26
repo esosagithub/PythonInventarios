@@ -167,6 +167,11 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # Archivos multimedia (opcional para futuras imágenes de productos)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+ACTAS_FINALES_DOCUMENTOS_DIR = (
+    os.environ.get('ACTAS_FINALES_DOCUMENTOS_DIR')
+    or os.path.join(MEDIA_ROOT, 'actas_finales')
+)
+ACTAS_FINALES_DOCUMENTO_MAX_MB = 10
 
 
 # Default primary key field type

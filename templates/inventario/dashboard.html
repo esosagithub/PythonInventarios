@@ -35,6 +35,9 @@
                     <!-- ADMINISTRACIÓN DE CONTEO - SOLO PARA ADMINISTRATIVO -->
                     {% if perfil == "ADMINISTRATIVO" %}
                     <li class="menu-item">
+                        <a href="{% url 'reversos' %}"><span>Reversos</span></a>
+                    </li>
+                    <li class="menu-item">
                         <a href="{% url 'administracion_conteo' %}">
                             <span>Administración de Conteo</span>
                         </a>
@@ -53,6 +56,11 @@
                     <li class="menu-item">
                         <a href="{% url 'administracion_conteo_jefe' %}">
                             <span>Administración de Conteo</span>
+                        </a>
+                    </li>
+                    <li class="menu-item">
+                        <a href="{% url 'actas_finales_tienda' %}">
+                            <span>Actas Finales de Tienda</span>
                         </a>
                     </li>
                     {% endif %}
@@ -150,6 +158,34 @@
                 </div>
             </div>
         </div>
+
+        {% if actas_pendientes_denuncia %}
+        <section class="denuncia-alerta" role="alert" aria-live="polite">
+            <div class="denuncia-alerta-icono">
+                <i class="fas fa-exclamation-triangle" aria-hidden="true"></i>
+            </div>
+            <div class="denuncia-alerta-contenido">
+                <h2>Denuncia pendiente</h2>
+                {% if actas_pendientes_denuncia|length == 1 %}
+                <p>Ya descargó el acta final y aún no ha subido la denuncia. Es obligatoria.</p>
+                {% else %}
+                <p>Ya descargó las actas finales y aún no ha subido las denuncias. Son obligatorias.</p>
+                {% endif %}
+                <ul>
+                    {% for acta in actas_pendientes_denuncia %}
+                    <li>
+                        Acta N° {{ acta.acta_final_id }} ·
+                        {{ acta.codigo_inventario|default:'Sin código' }} ·
+                        descargada el {{ acta.primera_descarga|date:'d/m/Y H:i' }}
+                    </li>
+                    {% endfor %}
+                </ul>
+                <a class="btn btn-danger" href="{% url 'actas_finales_tienda' %}">
+                    <i class="fas fa-upload"></i> Subir denuncia
+                </a>
+            </div>
+        </section>
+        {% endif %}
 
         <div class="content-body"></div>
     </div>
@@ -265,6 +301,29 @@
     margin-top: 3px;
     text-transform: capitalize;
 }
+.denuncia-alerta {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    margin: 18px 0;
+    padding: 20px 22px;
+    border: 1px solid #f59e0b;
+    border-left: 8px solid #dc2626;
+    border-radius: 12px;
+    background: #fff7ed;
+    color: #7c2d12;
+    box-shadow: 0 8px 20px rgba(124, 45, 18, .12);
+}
+.denuncia-alerta-icono {
+    color: #dc2626;
+    font-size: 28px;
+    line-height: 1;
+}
+.denuncia-alerta-contenido { flex: 1; min-width: 0; }
+.denuncia-alerta h2 { margin: 0 0 6px; font-size: 20px; color: #991b1b; }
+.denuncia-alerta p { margin: 0 0 10px; font-weight: 600; }
+.denuncia-alerta ul { margin: 0 0 14px; padding-left: 20px; }
+.denuncia-alerta li { margin-bottom: 5px; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
     .dh-badge {
         width: 100%;
@@ -274,6 +333,10 @@
     .dh-title { font-size: 20px !important; }
     .dh-welcome { font-size: 14px; }
     .dh-pill { width: 100%; justify-content: center; }
+    .denuncia-alerta { padding: 16px; gap: 10px; }
+    .denuncia-alerta-icono { font-size: 22px; }
+    .denuncia-alerta h2 { font-size: 18px; }
+    .denuncia-alerta .btn { width: 100%; text-align: center; }
 }
 </style>
 </div>

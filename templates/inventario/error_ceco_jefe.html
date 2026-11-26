@@ -1,0 +1,32 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error de configuracion de tienda</title>
+    <script>
+        window.addEventListener('DOMContentLoaded', function () {
+            alert(
+                'Error: comuniquese con el administrador del sistema.\n\n' +
+                'No se encuentra CECO en JDE-GENERAL/TIENDASXCOCENPTOXPAIS_VIEW.'
+            );
+            window.location.replace("{% url 'administracion_conteo_jefe' %}");
+        });
+    </script>
+</head>
+<body>
+    <noscript>
+        <p>
+            Error: comuniquese con el administrador del sistema.
+            No se encuentra CECO en
+            JDE-GENERAL/TIENDASXCOCENPTOXPAIS_VIEW.
+        </p>
+        <p>
+            <a href="{% url 'administracion_conteo_jefe' %}">
+                Regresar a Administracion de Conteos
+            </a>
+        </p>
+    </noscript>
+</body>
+</html>

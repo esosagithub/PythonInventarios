@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Actas Finales de Tienda</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:24px;color:#1f2937;background:#f8fafc;line-height:1.45}
+    h1,h2{color:#111827} h1{margin-bottom:6px} h2{margin-top:30px}
+    .intro,.notice{background:#fff;padding:16px;border-left:5px solid #2563eb;border-radius:8px}
+    .notice{border-left-color:#dc2626;background:#fff7ed}
+    table{width:100%;border-collapse:collapse;background:#fff;font-size:13px;margin:12px 0}
+    th,td{border:1px solid #d1d5db;padding:8px;text-align:left;vertical-align:top}
+    th{background:#1f2937;color:#fff} code{font-family:Consolas,monospace;overflow-wrap:anywhere}
+    li{margin-bottom:6px}
+  </style>
+</head>
+<body>
+  <h1>Módulo “Actas Finales de Tienda”</h1>
+  <div class="intro">
+    <strong>Objetivo:</strong> permitir que el perfil JEFE DE TIENDA consulte las actas finales
+    de sus tiendas, descargue el PDF oficial y conserve el acta firmada y la denuncia.
+    La denuncia es <strong>obligatoria</strong> y puede subirse en cualquier momento, sin descarga previa.
+  </div>
+
+  <h2>Alcance de tienda</h2>
+  <p>La tienda no se toma de <code>acta_final_tbl.centro/almacen</code>, porque esos datos pueden ser
+  inconsistentes. Se cruzan los valores de <code>acta_final_tbl.numeros_conteo</code> con
+  <code>INV_PIQUEOS_INVENTARIO_TBL</code> y se aplica <code>_filtro_conteos_usuario(request, 'p')</code>.
+  Así, una URL directa de un acta ajena responde 404.</p>
+
+  <h2>Flujo operativo</h2>
+  <ol>
+    <li>El jefe descarga el PDF generado por la vista existente. Cada descarga exitosa queda auditada.</li>
+    <li>Después de al menos una descarga puede subir el acta firmada.</li>
+    <li>La denuncia es obligatoria, pero se puede cargar antes o después de descargar el acta.</li>
+    <li>Una nueva carga del mismo tipo marca la versión anterior como REEMPLAZADO y conserva su archivo.</li>
+  </ol>
+
+  <h2>Aviso de denuncia pendiente</h2>
+  <div class="notice">
+    En cada visita al dashboard, el JEFE DE TIENDA ve “Denuncia pendiente” por las actas activas
+    de su tienda que ya tengan al menos una descarga y no tengan una DENUNCIA VIGENTE.
+    Un acta sin descargas no genera aviso. El aviso desaparece inmediatamente cuando se carga la
+    denuncia y no puede ocultarse mientras siga pendiente. Si las tablas aún no existen o la consulta
+    falla, el error se registra y el dashboard continúa funcionando sin el aviso.
+  </div>
+
+  <h2>Validación de documentos</h2>
+  <ul>
+    <li>Archivo no vacío, extensión <code>.pdf</code> y contenido iniciado por <code>%PDF-</code>.</li>
+    <li>Máximo configurado por <code>ACTAS_FINALES_DOCUMENTO_MAX_MB</code> (10 MB).</li>
+    <li>Ruta real comprobada dentro de <code>ACTAS_FINALES_DOCUMENTOS_DIR</code>.</li>
+    <li>Nombre físico generado por el sistema; el nombre del usuario solo se conserva como metadato.</li>
+    <li>El acta firmada requiere descarga previa. La denuncia no la requiere.</li>
+  </ul>
+
+  <h2>Tablas</h2>
+  <p>Ninguna tabla tiene FK hacia ACTA_FINAL_TBL: la evidencia se conserva aunque el acta se elimine físicamente.</p>
+  <table>
+    <thead><tr><th>Tabla</th><th>Columna</th><th>Uso</th></tr></thead>
+    <tbody>
+      <tr><td>INV_ACTA_FINAL_DESCARGA_TBL</td><td>DESCARGA_ID</td><td>Identidad y clave primaria.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DESCARGA_TBL</td><td>ACTA_FINAL_ID</td><td>Acta descargada.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DESCARGA_TBL</td><td>CENTRO / ALMACEN</td><td>Tienda resuelta desde los conteos.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DESCARGA_TBL</td><td>CEDULA_USUARIO / NOMBRE_USUARIO</td><td>Identidad del jefe que descargó.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DESCARGA_TBL</td><td>PERFIL</td><td>Perfil activo durante la descarga.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DESCARGA_TBL</td><td>DIRECCION_IP</td><td>IP de la solicitud.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DESCARGA_TBL</td><td>FECHA_DESCARGA</td><td>Fecha y hora Oracle de la descarga exitosa.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>DOCUMENTO_ID</td><td>Identidad y clave primaria.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>ACTA_FINAL_ID</td><td>Acta a la que pertenece el archivo.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>TIPO_DOCUMENTO</td><td>ACTA_FIRMADA o DENUNCIA.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>ESTADO</td><td>VIGENTE o REEMPLAZADO.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>NOMBRE_ORIGINAL</td><td>Nombre recibido, limitado a 255 caracteres.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>RUTA_RELATIVA</td><td>Ubicación dentro del directorio protegido.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>TAMANO_BYTES</td><td>Tamaño real escrito.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>HASH_SHA256</td><td>Huella de integridad del contenido.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>CENTRO / ALMACEN</td><td>Tienda resuelta desde los conteos.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>CEDULA_USUARIO / NOMBRE_USUARIO</td><td>Usuario que cargó la versión.</td></tr>
+      <tr><td>INV_ACTA_FINAL_DOCUMENTO_TBL</td><td>FECHA_CARGA</td><td>Fecha y hora Oracle de la carga.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Estructura de carpetas</h2>
+  <p><code>&lt;ACTAS_FINALES_DOCUMENTOS_DIR&gt;/&lt;almacen_seguro&gt;/&lt;acta_final_id&gt;/TIPO_YYYYMMDD_HHMMSS_uuid8.pdf</code></p>
+
+  <h2>Rutas protegidas</h2>
+  <table>
+    <thead><tr><th>Ruta</th><th>Función</th></tr></thead>
+    <tbody>
+      <tr><td>/actas-finales-tienda/</td><td>Lista de actas de la tienda.</td></tr>
+      <tr><td>/actas-finales-tienda/&lt;id&gt;/descargar/</td><td>Descarga y registra el PDF.</td></tr>
+      <tr><td>/actas-finales-tienda/&lt;id&gt;/subir/</td><td>Carga o reemplaza un documento.</td></tr>
+      <tr><td>/actas-finales-tienda/documento/&lt;id&gt;/</td><td>Entrega protegida del PDF cargado.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Configuración y despliegue</h2>
+  <p>Defina <code>ACTAS_FINALES_DOCUMENTOS_DIR</code> en el entorno. La cuenta del servicio NSSM debe
+  tener permisos de lectura y escritura. La carpeta no se publica por MEDIA_URL y debe incluirse en respaldos.</p>
+
+  <h2>Pendientes de etapa 2</h2>
+  <ul>
+    <li>Pantalla administrativa con historial de descargas y versiones.</li>
+    <li>Política para impedir la eliminación de actas con evidencia.</li>
+    <li>Historial visible de documentos reemplazados y notificaciones administrativas.</li>
+  </ul>
+</body>
+</html>

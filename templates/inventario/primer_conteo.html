@@ -699,7 +699,7 @@
                             if (estadoEAN !== 'VALIDADO') {
                                 botonesHTML = `
                             <div class="action-buttons">
-                                <button class="btn-icon btn-warning" title="Reprocesar EAN" onclick="reprocesarEAN('${barcode.codigo_barras}')">
+                                <button class="btn-icon btn-warning" title="Reprocesar EAN" data-codigo-barras="${barcode.codigo_barras}" onclick="reprocesarEAN('${barcode.codigo_barras}')">
                                     <i class="fas fa-rotate"></i>
                                 </button>
                                 <button class="btn-icon btn-danger" title="Eliminar" onclick="eliminarBarcode('${barcode.codigo_barras}')">
@@ -992,11 +992,29 @@
         }
     }
 
-    function reprocesarEAN(codigoBarras) {
-        if (confirm(`¿Está seguro de que desea reprocesar el código de barras: ${codigoBarras}?`)) {
-            showLoading('Reprocesando EAN...');
+    const eanEnReprocesamiento = new Set();
 
-            fetch('/reprocesar-ean-primer-conteo/', {
+    async function reprocesarEAN(codigoBarras) {
+        const codigoNormalizado = String(codigoBarras).replace(/^0+/, '') || '0';
+
+        if (eanEnReprocesamiento.has(codigoNormalizado)) {
+            alert('Este EAN ya se está reprocesando. Espere a que termine.');
+            return;
+        }
+
+        if (!confirm(`¿Está seguro de que desea reprocesar el código de barras: ${codigoBarras}?`)) {
+            return;
+        }
+
+        eanEnReprocesamiento.add(codigoNormalizado);
+        const botones = document.querySelectorAll(
+            `[data-codigo-barras="${CSS.escape(String(codigoBarras))}"]`
+        );
+        botones.forEach(boton => boton.disabled = true);
+        showLoading('Reprocesando EAN...');
+
+        try {
+            const response = await fetch('/reprocesar-ean-primer-conteo/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1005,35 +1023,30 @@
                 body: JSON.stringify({
                     codigo_barras: codigoBarras,
                     section_name: currentSectionCode,
-                    piqueo_id: currentConteoId
+                    piqueo_id: currentConteoId,
+                    numero_conteo: currentNumeroConteo
                 })
-            })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    hideLoading();
-                    if (data.success) {
-                        console.log('✅ EAN reprocesado:', data);
+            });
+            const data = await response.json();
 
-                        if (data.nuevo_estado_validacion && data.section_name) {
-                            actualizarEstadoDetalleEnUI(data.section_name, data.nuevo_estado_validacion);
-                        }
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || `HTTP error! status: ${response.status}`);
+            }
 
-                        alert(data.message);
-                        cargarBarcodesEscaneo(currentSectionCode);
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    hideLoading();
-                    console.error('Error:', error);
-                    alert('Error al reprocesar el código de barras: ' + error.message);
-                });
+            console.log('✅ EAN reprocesado:', data);
+            if (data.nuevo_estado_validacion && data.section_name) {
+                actualizarEstadoDetalleEnUI(data.section_name, data.nuevo_estado_validacion);
+            }
+
+            alert(data.message);
+            cargarBarcodesEscaneo(currentSectionCode);
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error al reprocesar el código de barras: ' + error.message);
+        } finally {
+            hideLoading();
+            eanEnReprocesamiento.delete(codigoNormalizado);
+            botones.forEach(boton => boton.disabled = false);
         }
     }
 
@@ -1050,7 +1063,7 @@
                 // Extraer el código de barras del onclick del botón
                 const onclickAttr = btnReprocesar.getAttribute('onclick');
                 const match = onclickAttr && onclickAttr.match(/reprocesarEAN\('([^']+)'\)/);
-                if (match && match[1]) {
+                if (match && match[1] && !codigosConError.includes(match[1])) {
                     codigosConError.push(match[1]);
                 }
             }
@@ -1091,7 +1104,8 @@
                     body: JSON.stringify({
                         codigo_barras: codigoBarras,
                         section_name: currentSectionCode,
-                        piqueo_id: currentConteoId
+                        piqueo_id: currentConteoId,
+                        numero_conteo: currentNumeroConteo
                     })
                 });
 

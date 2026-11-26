@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="menu-toggle" id="menuToggle"><span></span><span></span><span></span></div>
+    <div class="menu-overlay" id="menuOverlay"></div>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header"><h3>Sistema Inventarios</h3><p>{{ usuario.nombre|truncatewords:2 }}</p><small>{{ perfil }}</small></div>
+        <nav class="sidebar-menu"><ul>
+            <li class="menu-item"><a href="{% url 'dashboard' %}"><span>Dashboard</span></a></li>
+            <li class="menu-item"><a href="{% url 'administracion_conteo' %}"><span>Administración de Conteo</span></a></li>
+            <li class="menu-item active"><a href="{% url 'reversos' %}"><span>Reversos</span></a></li>
+            <li class="menu-item"><a href="{% url 'tercer_conteo' %}"><span>Tercer Conteo</span></a></li>
+            <li class="menu-item"><a href="{% url 'acta_final' %}"><span>Acta Final</span></a></li>
+        </ul></nav>
+        <div class="sidebar-footer"><a href="{% url 'login' %}" class="logout-btn"><span>Cerrar Sesión</span></a></div>
+    </div>
+    <div class="main-content" id="mainContent">
+        <div class="content-header"><h1>Reversos de Conteo</h1><p>Consulte un conteo y reviértalo únicamente un paso en el flujo.</p></div>
+        {% if messages %}{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="alert">{{ message }}</div>{% endfor %}{% endif %}
+        <div class="card" style="max-width:850px;">
+            <form method="get" class="filter-grid">
+                <div class="form-group"><label for="numero_conteo">Número de conteo</label><input id="numero_conteo" name="numero_conteo" class="form-control" value="{{ numero_conteo }}" required autofocus></div>
+                <div class="form-group" style="justify-content:flex-end;"><button class="btn btn-primary" type="submit"><i class="fas fa-search"></i> Consultar</button></div>
+            </form>
+        </div>
+        {% if conteo %}<div class="card" style="margin-top:16px;max-width:850px;">
+            <h2>Resultado de la consulta</h2>
+            <div class="table-responsive"><table class="data-table"><tbody>
+                <tr><th>Número de conteo</th><td>{{ conteo.numero_conteo }}</td></tr>
+                <tr><th>Estado actual</th><td><span class="status-badge status-{{ conteo.estado|lower }}">{{ conteo.estado }}</span></td></tr>
+                <tr><th>Centro / Almacén</th><td>{{ conteo.centro|default:'-' }} / {{ conteo.almacen|default:'-' }}</td></tr>
+                <tr><th>Fecha inicio</th><td>{{ conteo.fecha_inicio|default:'-' }}</td></tr>
+                <tr><th>Fecha fin</th><td>{{ conteo.fecha_fin|default:'-' }}</td></tr>
+                {% if conteo.puede_reversar %}<tr><th>Nuevo estado</th><td>{{ conteo.estado_anterior }}</td></tr>{% endif %}
+            </tbody></table></div>
+            {% if conteo.puede_reversar %}<form method="post" style="margin-top:18px;">{% csrf_token %}<input type="hidden" name="numero_conteo" value="{{ conteo.numero_conteo }}"><input type="hidden" name="accion" value="reversar"><button class="btn btn-danger" type="submit" onclick="return confirm('¿Confirma reversar el conteo {{ conteo.numero_conteo }} de {{ conteo.estado }} a {{ conteo.estado_anterior }}?');"><i class="fas fa-undo"></i> Reversar</button></form>
+            {% else %}<p style="margin-top:18px;">Este conteo no puede reversarse. Los estados habilitados son PRIMER_CONTEO, SEGUNDO_CONTEO y ACTA_PRELIMINAR.</p>{% endif %}
+        </div>{% endif %}
+    </div>
+</div>
+{% endblock %}

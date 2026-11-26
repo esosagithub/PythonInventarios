@@ -59,7 +59,12 @@
 
         <!-- Barra de Acciones -->
         <div class="action-bar">
-            <a href="{% url 'nuevo_conteo_jefe' %}" class="btn btn-primary">
+            <a id="btnNuevoConteo" class="btn btn-primary"
+               data-url="{% url 'nuevo_conteo_jefe' %}"
+               onclick="return validarNuevoConteo(event)"
+               {% if nuevo_conteo_bloqueado %}aria-disabled="true"
+               title="Existe un conteo EN_PROCESO, PRIMER_CONTEO, SEGUNDO_CONTEO o PENDIENTE"
+               {% else %}href="{% url 'nuevo_conteo_jefe' %}"{% endif %}>
                 <i class="icon">+</i> Nuevo
             </a>
             <div class="action-buttons">
@@ -383,6 +388,7 @@ function applyFilters() {
         
         updateTable(data.conteos);
         updateStatistics(data.estadisticas);
+        updateNuevoConteoButton(data.nuevo_conteo_bloqueado);
         updateActiveFilters();
         closeFiltersModal();
     })
@@ -390,6 +396,29 @@ function applyFilters() {
         console.error('Error:', error);
         alert('Error al aplicar filtros');
     });
+}
+
+function updateNuevoConteoButton(bloqueado) {
+    const link = document.getElementById('btnNuevoConteo');
+    if (bloqueado) {
+        link.removeAttribute('href');
+        link.setAttribute('aria-disabled', 'true');
+        link.title = 'Existe un conteo EN_PROCESO, PRIMER_CONTEO, SEGUNDO_CONTEO o PENDIENTE';
+    } else {
+        link.href = link.dataset.url;
+        link.removeAttribute('aria-disabled');
+        link.title = '';
+    }
+}
+
+function validarNuevoConteo(event) {
+    const link = event.currentTarget;
+    if (link.getAttribute('aria-disabled') === 'true') {
+        event.preventDefault();
+        alert('Debe cerrar todos los procesos para agregar un nuevo conteo.');
+        return false;
+    }
+    return true;
 }
 
 function updateTable(conteos) {
